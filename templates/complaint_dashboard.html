@@ -1,0 +1,214 @@
+﻿{% extends 'base.html' %}
+{% block title %}Complaint Review — Call Review Queue{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="mb-4">
+  <h4 class="fw-bold mb-0">
+    <i class="bi bi-headphones text-success me-2"></i>Complaint Review Station
+  </h4>
+  <p class="text-muted small mb-0">Manage your availability and review your assigned CallerIDs.</p>
+</div>
+
+<!-- Status Bar -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-dark text-white py-2">
+    <i class="bi bi-toggle2-on me-1"></i> My Status
+    <small class="ms-2 text-muted">Your status controls whether you receive new assignments</small>
+  </div>
+  <div class="card-body">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <!-- Present -->
+      <form method="POST" action="{{ url_for('update_self_status') }}">
+        <input type="hidden" name="status" value="present">
+        <button type="submit"
+          class="btn {% if member.self_status == 'present' %}btn-success{% else %}btn-outline-success{% endif %} px-4">
+          <i class="bi bi-circle-fill me-2" style="font-size:0.6rem; vertical-align:middle;"></i>Present
+          {% if member.self_status == 'present' %}<span class="badge bg-white text-success ms-1">Active</span>{% endif %}
+        </button>
+      </form>
+
+      <!-- Break -->
+      <form method="POST" action="{{ url_for('update_self_status') }}">
+        <input type="hidden" name="status" value="break">
+        <button type="submit"
+          class="btn {% if member.self_status == 'break' %}btn-warning{% else %}btn-outline-warning{% endif %} px-4">
+          <i class="bi bi-pause-circle me-2"></i>Break
+          {% if member.self_status == 'break' %}<span class="badge bg-white text-warning ms-1">Active</span>{% endif %}
+        </button>
+      </form>
+
+      <!-- Sign Off -->
+      <form method="POST" action="{{ url_for('update_self_status') }}"
+            onsubmit="return confirm('Sign off for this shift?\n\nAny active assignment will be returned to the queue and admin approval will be reset.')">
+        <input type="hidden" name="status" value="signoff">
+        <button type="submit"
+          class="btn {% if member.self_status == 'signoff' %}btn-secondary{% else %}btn-outline-secondary{% endif %} px-4">
+          <i class="bi bi-box-arrow-right me-2"></i>Sign Off
+        </button>
+      </form>
+
+      <!-- Admin Approval Status -->
+      <div class="ms-auto">
+        {% if member.admin_approved %}
+          <span class="badge bg-success fs-6 px-3 py-2">
+            <i class="bi bi-shield-check me-1"></i> Admin Approved
+          </span>
+        {% else %}
+          <span class="badge bg-warning text-dark fs-6 px-3 py-2">
+            <i class="bi bi-shield-exclamation me-1"></i> Awaiting Admin Approval
+          </span>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if member.self_status == 'present' and not member.admin_approved %}
+    <div class="alert alert-info mt-3 mb-0 py-2 small">
+      <i class="bi bi-info-circle me-1"></i>
+      You are marked <strong>Present</strong>. Waiting for the admin to approve you before assignments begin.
+    </div>
+    {% elif member.self_status == 'break' %}
+    <div class="alert alert-warning mt-3 mb-0 py-2 small">
+      <i class="bi bi-pause-circle me-1"></i>
+      You are on <strong>Break</strong>. Finish your current assignment if you have one — no new CallerIDs will be assigned.
+    </div>
+    {% elif member.self_status == 'signoff' %}
+    <div class="alert alert-secondary mt-3 mb-0 py-2 small">
+      <i class="bi bi-box-arrow-right me-1"></i>
+      You have <strong>Signed Off</strong>. Press Present to begin a new shift.
+    </div>
+    {% elif member.self_status == 'offline' %}
+    <div class="alert alert-secondary mt-3 mb-0 py-2 small">
+      <i class="bi bi-circle me-1"></i>
+      You are <strong>Offline</strong>. Press Present to start receiving assignments.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Current Assignment -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header py-2 d-flex justify-content-between align-items-center
+    {% if assignment %}bg-info bg-opacity-20{% else %}bg-white{% endif %}">
+    <span class="fw-semibold">
+      <i class="bi bi-person-lines-fill me-1"></i> Current Assignment
+    </span>
+    {% if assignment %}
+      <span class="badge bg-info text-dark">1 Active</span>
+    {% else %}
+      <span class="badge bg-secondary">None</span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    {% if assignment %}
+    <div class="d-flex flex-wrap gap-3 align-items-start">
+      <div class="flex-grow-1">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <div class="display-6 font-monospace fw-bold text-info">{{ assignment.caller_id_ref.caller_id_number }}</div>
+          <div>
+            <div class="text-muted small">Submitted by</div>
+            <div class="fw-semibold">{{ assignment.caller_id_ref.submitted_by.name }}</div>
+          </div>
+        </div>
+        {% if assignment.caller_id_ref.aws_recording_url %}
+        <a href="{{ assignment.caller_id_ref.aws_recording_url }}" target="_blank"
+           class="btn btn-sm btn-outline-primary me-2">
+          <i class="bi bi-play-circle me-1"></i> Listen to Recording
+        </a>
+        {% else %}
+        <span class="text-muted small"><i class="bi bi-exclamation-circle me-1"></i>No recording URL provided</span>
+        {% endif %}
+        <div class="text-muted small mt-2">
+          Assigned: {{ assignment.assigned_at.strftime('%H:%M, %d %b %Y') if assignment.assigned_at else '—' }}
+        </div>
+      </div>
+      <div>
+        <a href="{{ url_for('analyse_assignment', assignment_id=assignment.id) }}"
+           class="btn btn-success btn-lg px-4">
+          <i class="bi bi-search me-2"></i> Analyse
+        </a>
+      </div>
+    </div>
+    {% elif member.is_eligible %}
+    <div class="text-center py-4 text-muted">
+      <div class="spinner-border spinner-border-sm text-info mb-2" role="status"></div>
+      <p class="mb-0">You are eligible — waiting for the next CallerID in the queue.</p>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted">
+      <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+      {% if member.self_status in ('offline', 'signoff') %}
+        Press <strong>Present</strong> above to begin your shift.
+      {% elif member.self_status == 'break' %}
+        No active assignment. Return from break to receive a new one.
+      {% elif member.self_status == 'present' and not member.admin_approved %}
+        Waiting for admin to approve you.
+      {% else %}
+        No assignment right now.
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- History -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">
+      <i class="bi bi-clock-history me-1"></i> Review History
+    </span>
+    <span class="badge bg-secondary">{{ history | length }}</span>
+  </div>
+  <div class="card-body p-0">
+    {% if history %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">CallerID</th>
+            <th>Submitted By</th>
+            <th>Recording</th>
+            <th>Outcome</th>
+            <th>Completed At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for asn in history %}
+          <tr>
+            <td class="ps-3 font-monospace fw-semibold">{{ asn.caller_id_ref.caller_id_number }}</td>
+            <td class="small text-muted">{{ asn.caller_id_ref.submitted_by.name }}</td>
+            <td class="small">
+              {% if asn.caller_id_ref.aws_recording_url %}
+                <a href="{{ asn.caller_id_ref.aws_recording_url }}" target="_blank" class="text-decoration-none">
+                  <i class="bi bi-play-circle me-1"></i>Play
+                </a>
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if asn.outcome == 'dismiss' %}
+                <span class="badge bg-secondary"><i class="bi bi-archive me-1"></i>Dismissed</span>
+              {% elif asn.outcome == 'followup' %}
+                <span class="badge bg-danger"><i class="bi bi-flag me-1"></i>Follow-up</span>
+              {% else %}
+                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Completed</span>
+              {% endif %}
+            </td>
+            <td class="small text-muted">
+              {% if asn.completed_at %}{{ asn.completed_at.strftime('%H:%M, %d %b %Y') }}{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted small">
+      <i class="bi bi-clock-history fs-3 d-block mb-1"></i>
+      No completed reviews yet. Start analysing your assignments above.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

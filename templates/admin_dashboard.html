@@ -1,0 +1,336 @@
+{% extends 'base.html' %}
+{% block title %}Admin Control Panel — Call Review Queue{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
+{% block content %}
+
+<!-- Page Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h4 class="fw-bold mb-0"><i class="bi bi-shield-check text-danger me-2"></i>Admin Control Panel</h4>
+    <p class="text-muted small mb-0">
+      Approve complaint members &middot; Monitor the review queue &middot; Handle follow-ups
+      <span class="text-success ms-2"><i class="bi bi-arrow-clockwise"></i> Auto-refreshes every 30s</span>
+    </p>
+  </div>
+  <div class="text-muted small text-end">
+    Last refreshed<br><strong id="refreshTime"></strong>
+  </div>
+</div>
+
+<!-- Stats Row -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-3 fw-bold">{{ stats.total }}</div>
+      <div class="small text-muted">Total CallerIDs</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-3 fw-bold text-warning">{{ stats.queued }}</div>
+      <div class="small text-muted">In Queue</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-3 fw-bold text-info">{{ stats.assigned }}</div>
+      <div class="small text-muted">Assigned</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-3 fw-bold text-danger">{{ stats.followup }}</div>
+      <div class="small text-muted">Follow-up</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-3 fw-bold text-secondary">{{ stats.dismissed }}</div>
+      <div class="small text-muted">QA Queue</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg">
+    <div class="card border-0 shadow-sm text-center py-3 h-100 border-start border-4 border-success">
+      <div class="fs-3 fw-bold text-success">{{ stats.eligible }}<span class="fs-6 text-muted fw-normal"> / {{ stats.team_size }}</span></div>
+      <div class="small text-muted">Eligible (Active)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Team Availability -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-dark text-white py-2">
+    <i class="bi bi-people-fill me-1"></i> Team Availability
+    <small class="ms-2 text-warning">Member must self-mark Present before you can approve them</small>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% for member in team_members %}
+      {% set status = member.self_status %}
+      <div class="col-sm-6 col-md-3">
+        <div class="card h-100 border-2
+          {% if status == 'present' and member.admin_approved %}border-success bg-success bg-opacity-10
+          {% elif status == 'present' %}border-warning bg-warning bg-opacity-10
+          {% elif status == 'break' %}border-warning
+          {% elif status == 'signoff' %}border-secondary
+          {% else %}border-light{% endif %}">
+          <div class="card-body text-center py-3">
+            <div class="fs-1 mb-1">
+              {% if status == 'present' and member.admin_approved %}
+                <i class="bi bi-person-check-fill text-success"></i>
+              {% elif status == 'present' %}
+                <i class="bi bi-person-fill text-warning"></i>
+              {% elif status == 'break' %}
+                <i class="bi bi-pause-circle-fill text-warning"></i>
+              {% elif status == 'signoff' %}
+                <i class="bi bi-person-dash-fill text-secondary"></i>
+              {% else %}
+                <i class="bi bi-person-x-fill text-secondary"></i>
+              {% endif %}
+            </div>
+            <div class="fw-semibold">{{ member.user.name }}</div>
+            <div class="small text-muted mb-2">@{{ member.user.username }}</div>
+            <div class="mb-2">
+              {% if status == 'present' and member.admin_approved %}
+                <span class="badge bg-success">ELIGIBLE</span>
+              {% elif status == 'present' %}
+                <span class="badge bg-warning text-dark">AWAITING APPROVAL</span>
+              {% elif status == 'break' %}
+                <span class="badge bg-warning text-dark">ON BREAK</span>
+              {% elif status == 'signoff' %}
+                <span class="badge bg-secondary">SIGNED OFF</span>
+              {% else %}
+                <span class="badge bg-secondary">OFFLINE</span>
+              {% endif %}
+            </div>
+            {% if member.active_assignment %}
+              <div class="small text-info mb-2">
+                <i class="bi bi-headphones me-1"></i>
+                Reviewing: <span class="font-monospace fw-semibold">{{ member.active_assignment.caller_id_ref.caller_id_number }}</span>
+              </div>
+            {% endif %}
+            <form method="POST" action="{{ url_for('toggle_approval', member_id=member.id) }}">
+              {% if member.admin_approved %}
+                <button type="submit" class="btn btn-sm btn-outline-danger w-100">
+                  <i class="bi bi-person-dash me-1"></i> Remove Approval
+                </button>
+              {% elif status == 'present' %}
+                <button type="submit" class="btn btn-sm btn-success w-100">
+                  <i class="bi bi-person-check me-1"></i> Approve
+                </button>
+              {% else %}
+                <button type="button" class="btn btn-sm btn-outline-secondary w-100" disabled>
+                  <i class="bi bi-lock me-1"></i>
+                  {% if status == 'break' %}On Break
+                  {% elif status == 'signoff' %}Signed Off
+                  {% else %}Not Present{% endif %}
+                </button>
+              {% endif %}
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Queue & Assignments Side-by-Side -->
+<div class="row g-4 mb-4">
+
+  <!-- Pending Queue -->
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="bi bi-hourglass-split me-1"></i> Pending Queue</span>
+        <span class="badge bg-warning text-dark">{{ queued | length }}</span>
+      </div>
+      <div class="card-body p-0">
+        {% if queued %}
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">CallerID</th>
+                <th>Submitted By</th>
+                <th>Queued At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in queued %}
+              <tr>
+                <td class="ps-3 font-monospace fw-semibold">{{ c.caller_id_number }}</td>
+                <td class="small">{{ c.submitted_by.name }}</td>
+                <td class="small text-muted">{{ c.submitted_at.strftime('%H:%M, %d %b') }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted small">
+          <i class="bi bi-check2-all fs-4 d-block mb-1 text-success"></i>
+          Queue is empty — all CallerIDs have been assigned.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Assignments -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-info bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="bi bi-person-lines-fill me-1"></i> Active Assignments</span>
+        <span class="badge bg-info text-dark">{{ assigned_items | length }}</span>
+      </div>
+      <div class="card-body p-0">
+        {% if assigned_items %}
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">CallerID</th>
+                <th>Assigned To</th>
+                <th>Recording</th>
+                <th>Assigned At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in assigned_items %}
+              <tr>
+                <td class="ps-3 font-monospace fw-semibold">{{ item.caller.caller_id_number }}</td>
+                <td class="small"><i class="bi bi-person-circle text-success me-1"></i>{{ item.assigned_to }}</td>
+                <td class="small">
+                  {% if item.caller.aws_recording_url %}
+                    <a href="{{ item.caller.aws_recording_url }}" target="_blank" class="text-decoration-none">
+                      <i class="bi bi-play-circle"></i> Play
+                    </a>
+                  {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td class="small text-muted">
+                  {% if item.assigned_at %}{{ item.assigned_at.strftime('%H:%M, %d %b') }}{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted small">
+          <i class="bi bi-inbox fs-4 d-block mb-1"></i>
+          No active assignments. Mark team members as Present to begin.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Follow-up Queue -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-danger bg-opacity-10 py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-flag-fill text-danger me-1"></i> Follow-up Queue — Flagged by Complaints Team</span>
+    <span class="badge bg-danger">{{ followup_items | length }}</span>
+  </div>
+  <div class="card-body p-0">
+    {% if followup_items %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">CallerID</th>
+            <th>Submitted By</th>
+            <th>Submitted At</th>
+            <th>Recording</th>
+            <th class="text-center">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in followup_items %}
+          <tr>
+            <td class="ps-3 font-monospace fw-semibold text-danger">{{ c.caller_id_number }}</td>
+            <td class="small">{{ c.submitted_by.name }}</td>
+            <td class="small text-muted">{{ c.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td class="small">
+              {% if c.aws_recording_url %}
+                <a href="{{ c.aws_recording_url }}" target="_blank" class="text-decoration-none">
+                  <i class="bi bi-play-circle me-1"></i>Play
+                </a>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-center">
+              <form method="POST" action="{{ url_for('mark_reviewed', caller_id_id=c.id) }}"
+                    onsubmit="return confirm('Mark CallerID {{ c.caller_id_number }} as reviewed?')">
+                <button type="submit" class="btn btn-sm btn-outline-success">
+                  <i class="bi bi-check2-circle me-1"></i> Mark Reviewed
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted small">
+      <i class="bi bi-check2-circle fs-4 d-block mb-1 text-success"></i>
+      No follow-up items — all cases are cleared.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- QA Queue (Dismissed) -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-secondary bg-opacity-10 py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-archive me-1 text-secondary"></i> QA Queue — Dismissed (Last 20)</span>
+    <span class="badge bg-secondary">{{ dismissed_items | length }}</span>
+  </div>
+  <div class="card-body p-0">
+    {% if dismissed_items %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">CallerID</th>
+            <th>Submitted By</th>
+            <th>Submitted At</th>
+            <th>Recording</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in dismissed_items %}
+          <tr class="text-muted">
+            <td class="ps-3 font-monospace fw-semibold">{{ c.caller_id_number }}</td>
+            <td class="small">{{ c.submitted_by.name }}</td>
+            <td class="small">{{ c.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td class="small">
+              {% if c.aws_recording_url %}
+                <a href="{{ c.aws_recording_url }}" target="_blank" class="text-decoration-none">
+                  <i class="bi bi-play-circle me-1"></i>Play
+                </a>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted small">
+      <i class="bi bi-inbox fs-4 d-block mb-1"></i>
+      No dismissed CallerIDs yet.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('refreshTime').textContent =
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+</script>
+{% endblock %}
