@@ -69,3 +69,22 @@ class Assignment(db.Model):
     status = db.Column(db.String(20), nullable=False, default='active')  # active | completed
     # Outcome chosen by complaint member: None | dismiss | raised
     outcome = db.Column(db.String(20), nullable=True)
+
+
+class QAReview(db.Model):
+    __tablename__ = 'qa_reviews'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # A CallerID may be dismissed, required back, dismissed again — multiple reviews possible
+    caller_id_id = db.Column(db.Integer, db.ForeignKey('caller_ids.id'), nullable=False)
+    dismissed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    dismissed_at = db.Column(db.DateTime, nullable=False)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    # Verdict chosen by QA: required | not_required
+    verdict = db.Column(db.String(20), nullable=True)
+    justification = db.Column(db.Text, nullable=True)
+
+    caller_id_ref = db.relationship('CallerID', backref=db.backref('qa_reviews', lazy='dynamic'))
+    dismissed_by = db.relationship('User', foreign_keys=[dismissed_by_id])
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_id])

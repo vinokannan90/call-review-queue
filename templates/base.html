@@ -38,6 +38,7 @@
         <span class="badge nav-role-badge
           {% if current_user.role == 'admin' %}bg-danger
           {% elif current_user.role == 'complaint' %}bg-success
+          {% elif current_user.role == 'qa' %}bg-info text-dark
           {% else %}bg-primary{% endif %}">
           {{ current_user.role | upper }}
         </span>

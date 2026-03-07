@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+{% block title %}QA Review — Call Review Queue{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="mb-4">
+  <h4 class="fw-bold mb-0">
+    <i class="bi bi-clipboard2-check text-info me-2"></i>QA Review Dashboard
+  </h4>
+  <p class="text-muted small mb-0">
+    Review CallerIDs dismissed by the complaints team and decide whether further action is required.
+  </p>
+</div>
+
+<!-- Stats Row -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="fs-3 fw-bold text-warning">{{ pending | length }}</div>
+      <div class="small text-muted">Pending Review</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="fs-3 fw-bold text-success">{{ completed | length }}</div>
+      <div class="small text-muted">Completed (Last 20)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Pending QA Reviews -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-warning bg-opacity-20 py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">
+      <i class="bi bi-hourglass-split me-1"></i> Pending QA Reviews
+    </span>
+    <span class="badge bg-warning text-dark">{{ pending | length }}</span>
+  </div>
+  <div class="card-body {% if not pending %}p-0{% endif %}">
+    {% if pending %}
+    <div class="d-flex flex-column gap-4">
+
+      {% for review in pending %}
+      <div class="border rounded-3 p-4">
+
+        <!-- Info row -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-3">
+            <div class="text-muted small fw-semibold mb-1"><i class="bi bi-telephone me-1"></i>CallerID Number</div>
+            <div class="display-6 font-monospace fw-bold text-info">{{ review.caller_id_ref.caller_id_number }}</div>
+          </div>
+          <div class="col-md-3">
+            <div class="text-muted small fw-semibold mb-1"><i class="bi bi-person me-1"></i>Submitted By (User)</div>
+            <div class="fw-semibold">{{ review.caller_id_ref.submitted_by.name }}</div>
+            <div class="text-muted small">{{ review.caller_id_ref.submitted_at.strftime('%d %b %Y, %H:%M') }}</div>
+          </div>
+          <div class="col-md-3">
+            <div class="text-muted small fw-semibold mb-1"><i class="bi bi-headphones me-1"></i>Dismissed By (Complaint)</div>
+            <div class="fw-semibold">{{ review.dismissed_by.name }}</div>
+            <div class="text-muted small">{{ review.dismissed_at.strftime('%d %b %Y, %H:%M') }}</div>
+          </div>
+          <div class="col-md-3">
+            <div class="text-muted small fw-semibold mb-1"><i class="bi bi-play-circle me-1"></i>Recording</div>
+            {% if review.caller_id_ref.aws_recording_url %}
+            <a href="{{ review.caller_id_ref.aws_recording_url }}" target="_blank"
+               class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-play-circle me-1"></i> Listen
+            </a>
+            {% else %}
+            <span class="text-muted small">No recording provided</span>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if review.caller_id_ref.reason %}
+        <div class="alert alert-light border py-2 mb-3">
+          <div class="text-muted small fw-semibold mb-1">
+            <i class="bi bi-chat-left-text me-1"></i> Reason for Request (submitted by user)
+          </div>
+          <div class="small">{{ review.caller_id_ref.reason }}</div>
+        </div>
+        {% endif %}
+
+        <!-- Verdict Form -->
+        <hr class="my-3">
+        <form method="POST" action="{{ url_for('qa_submit', qa_review_id=review.id) }}"
+              onsubmit="return confirm('Submit QA verdict for CallerID {{ review.caller_id_ref.caller_id_number }}?')">
+
+          <div class="row g-3 align-items-start">
+
+            <!-- Verdict options -->
+            <div class="col-md-4">
+              <label class="form-label fw-semibold small">
+                Verdict <span class="text-danger">*</span>
+              </label>
+              <div class="d-flex flex-column gap-3">
+
+                <div class="form-check p-3 border rounded-2" id="reqCard_{{ review.id }}">
+                  <input class="form-check-input mt-1" type="radio" name="verdict"
+                         id="req_{{ review.id }}" value="required" required>
+                  <label class="form-check-label ms-1" for="req_{{ review.id }}">
+                    <span class="badge bg-danger mb-1">Required</span>
+                    <span class="text-muted small d-block">Re-allocate to complaint team for review</span>
+                  </label>
+                </div>
+
+                <div class="form-check p-3 border rounded-2" id="notReqCard_{{ review.id }}">
+                  <input class="form-check-input mt-1" type="radio" name="verdict"
+                         id="notreq_{{ review.id }}" value="not_required">
+                  <label class="form-check-label ms-1" for="notreq_{{ review.id }}">
+                    <span class="badge bg-secondary mb-1">Not Required</span>
+                    <span class="text-muted small d-block">Close the case — no further action needed</span>
+                  </label>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- Justification -->
+            <div class="col-md-6">
+              <label for="just_{{ review.id }}" class="form-label fw-semibold small">
+                Justification <span class="text-danger">*</span>
+              </label>
+              <textarea id="just_{{ review.id }}" name="justification"
+                        class="form-control" rows="5"
+                        placeholder="Explain why this case is Required or Not Required..."
+                        required></textarea>
+            </div>
+
+            <!-- Submit -->
+            <div class="col-md-2 d-flex align-items-end">
+              <button type="submit" class="btn btn-dark w-100 py-2">
+                <i class="bi bi-send me-1"></i> Submit
+              </button>
+            </div>
+
+          </div>
+        </form>
+      </div>
+      {% endfor %}
+
+    </div>
+    {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="bi bi-check2-circle fs-2 d-block mb-2 text-success"></i>
+      No pending QA reviews — all dismissed cases have been processed.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Completed Reviews -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">
+      <i class="bi bi-clock-history me-1"></i> Completed Reviews (Last 20)
+    </span>
+    <span class="badge bg-secondary">{{ completed | length }}</span>
+  </div>
+  <div class="card-body p-0">
+    {% if completed %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">CallerID</th>
+            <th>Submitted By</th>
+            <th>Dismissed By</th>
+            <th>Verdict</th>
+            <th>Justification</th>
+            <th>Reviewed By</th>
+            <th>Reviewed At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for review in completed %}
+          <tr>
+            <td class="ps-3 font-monospace fw-semibold">{{ review.caller_id_ref.caller_id_number }}</td>
+            <td class="small text-muted">{{ review.caller_id_ref.submitted_by.name }}</td>
+            <td class="small text-muted">{{ review.dismissed_by.name }}</td>
+            <td>
+              {% if review.verdict == 'required' %}
+                <span class="badge bg-danger"><i class="bi bi-arrow-repeat me-1"></i>Required</span>
+              {% else %}
+                <span class="badge bg-secondary"><i class="bi bi-x-circle me-1"></i>Not Required</span>
+              {% endif %}
+            </td>
+            <td class="small text-muted" style="max-width: 220px;">
+              <span title="{{ review.justification }}">
+                {{ review.justification[:90] }}{% if review.justification and review.justification | length > 90 %}&hellip;{% endif %}
+              </span>
+            </td>
+            <td class="small text-muted">{{ review.reviewed_by.name if review.reviewed_by else '—' }}</td>
+            <td class="small text-muted">
+              {{ review.reviewed_at.strftime('%d %b %Y, %H:%M') if review.reviewed_at else '—' }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted small">
+      <i class="bi bi-clock-history fs-3 d-block mb-1"></i>
+      No completed QA reviews yet.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Highlight selected verdict card
+  document.querySelectorAll('input[name="verdict"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      const reviewId = this.id.split('_').slice(1).join('_');
+      document.querySelectorAll('#reqCard_' + reviewId + ', #notReqCard_' + reviewId).forEach(function (card) {
+        card.classList.remove('border-primary', 'bg-primary', 'bg-opacity-5');
+      });
+      if (this.checked) {
+        this.closest('.form-check').classList.add('border-primary', 'bg-primary', 'bg-opacity-5');
+      }
+    });
+  });
+</script>
+{% endblock %}

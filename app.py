@@ -7,7 +7,7 @@ from flask_login import (LoginManager, current_user, login_required,
                          login_user, logout_user)
 from werkzeug.security import check_password_hash
 
-from models import Assignment, CallerID, TeamMember, User, db
+from models import Assignment, CallerID, QAReview, TeamMember, User, db
 
 load_dotenv()
 
@@ -115,6 +115,7 @@ def dashboard():
         'admin': 'admin_dashboard',
         'complaint': 'complaint_dashboard',
         'user': 'user_dashboard',
+        'qa': 'qa_dashboard',
     }
     return redirect(url_for(routes.get(current_user.role, 'user_dashboard')))
 
@@ -139,7 +140,7 @@ def user_dashboard():
         'total': len(submissions),
         'queued': sum(1 for s in submissions if s.status == 'queued'),
         'assigned': sum(1 for s in submissions if s.status == 'assigned'),
-        'completed': sum(1 for s in submissions if s.status in ('dismissed', 'raised', 'reviewed')),
+        'completed': sum(1 for s in submissions if s.status in ('dismissed', 'raised', 'reviewed', 'qa_not_required')),
     }
     return render_template('user_dashboard.html', submissions=submissions, stats=stats)
 
@@ -419,6 +420,13 @@ def submit_outcome(assignment_id):
     assignment.completed_at = datetime.now(timezone.utc)
     assignment.outcome = outcome
     assignment.caller_id_ref.status = 'dismissed' if outcome == 'dismiss' else 'raised'
+    if outcome == 'dismiss':
+        qa_record = QAReview(
+            caller_id_id=assignment.caller_id_id,
+            dismissed_by_id=current_user.id,
+            dismissed_at=datetime.now(timezone.utc),
+        )
+        db.session.add(qa_record)
     db.session.flush()
 
     # If still eligible, immediately auto-assign next queued CallerID
@@ -430,6 +438,77 @@ def submit_outcome(assignment_id):
     outcome_label = 'sent to QA queue' if outcome == 'dismiss' else 'raised for admin review'
     flash(f'CallerID {caller_number} {outcome_label}. You are ready for the next assignment.', 'success')
     return redirect(url_for('complaint_dashboard'))
+
+
+# ---------------------------------------------------------------------------
+# QA Review role routes
+# ---------------------------------------------------------------------------
+
+@app.route('/qa/dashboard')
+@login_required
+def qa_dashboard():
+    if current_user.role != 'qa':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    pending = (
+        QAReview.query
+        .filter_by(verdict=None)
+        .order_by(QAReview.dismissed_at)
+        .all()
+    )
+    completed = (
+        QAReview.query
+        .filter(QAReview.verdict.isnot(None))
+        .order_by(QAReview.reviewed_at.desc())
+        .limit(20)
+        .all()
+    )
+    return render_template('qa_dashboard.html', pending=pending, completed=completed)
+
+
+@app.route('/qa/submit/<int:qa_review_id>', methods=['POST'])
+@login_required
+def qa_submit(qa_review_id):
+    if current_user.role != 'qa':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    review = QAReview.query.get_or_404(qa_review_id)
+    if review.verdict is not None:
+        flash('This case has already been reviewed.', 'warning')
+        return redirect(url_for('qa_dashboard'))
+
+    verdict = request.form.get('verdict', '').strip()
+    justification = request.form.get('justification', '').strip() or None
+
+    if verdict not in ('required', 'not_required'):
+        flash('Please select a verdict — Required or Not Required.', 'danger')
+        return redirect(url_for('qa_dashboard'))
+
+    if not justification:
+        flash('Please provide a justification before submitting.', 'danger')
+        return redirect(url_for('qa_dashboard'))
+
+    review.verdict = verdict
+    review.justification = justification
+    review.reviewed_by_id = current_user.id
+    review.reviewed_at = datetime.now(timezone.utc)
+
+    caller = review.caller_id_ref
+    caller_number = caller.caller_id_number
+
+    if verdict == 'required':
+        caller.status = 'queued'
+        db.session.flush()
+        assign_queued_caller_ids()  # commits
+        flash(f'CallerID {caller_number} marked as Required — re-queued for complaint review.', 'success')
+    else:
+        caller.status = 'qa_not_required'
+        db.session.commit()
+        flash(f'CallerID {caller_number} marked as Not Required — case closed.', 'success')
+
+    return redirect(url_for('qa_dashboard'))
 
 
 if __name__ == '__main__':

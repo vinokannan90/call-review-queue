@@ -117,6 +117,8 @@
                 <span class="badge bg-secondary"><i class="bi bi-archive me-1"></i>QA Queue</span>
               {% elif s.status == 'raised' %}
                 <span class="badge bg-danger"><i class="bi bi-flag me-1"></i>Raised</span>
+              {% elif s.status == 'qa_not_required' %}
+                <span class="badge bg-dark"><i class="bi bi-x-circle me-1"></i>Not Required</span>
               {% elif s.status == 'reviewed' %}
                 <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Reviewed</span>
               {% else %}
