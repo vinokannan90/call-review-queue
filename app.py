@@ -153,6 +153,7 @@ def submit_caller_id():
 
     caller_id_number = request.form.get('caller_id', '').strip()
     aws_url = request.form.get('aws_url', '').strip() or None
+    reason = request.form.get('reason', '').strip() or None
 
     if not caller_id_number:
         flash('CallerID is required.', 'danger')
@@ -165,6 +166,7 @@ def submit_caller_id():
     new_entry = CallerID(
         caller_id_number=caller_id_number,
         aws_recording_url=aws_url,
+        reason=reason,
         submitted_by_id=current_user.id,
         submitted_at=datetime.now(timezone.utc),
         status='queued',

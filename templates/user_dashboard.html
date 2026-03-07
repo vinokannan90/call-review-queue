@@ -46,18 +46,25 @@
   </div>
   <div class="card-body">
     <form method="POST" action="{{ url_for('submit_caller_id') }}">
-      <div class="row g-3 align-items-end">
+      <div class="row g-3">
         <div class="col-md-4">
           <label for="caller_id" class="form-label fw-semibold">CallerID Number <span class="text-danger">*</span></label>
           <input type="text" id="caller_id" name="caller_id" class="form-control"
                  placeholder="e.g. 61294881234" required>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-8">
           <label for="aws_url" class="form-label fw-semibold">
             AWS Recording URL <span class="text-muted fw-normal">(optional)</span>
           </label>
           <input type="url" id="aws_url" name="aws_url" class="form-control"
                  placeholder="https://s3.amazonaws.com/bucket/recording.mp3">
+        </div>
+      </div>
+      <div class="row g-3 mt-1 align-items-end">
+        <div class="col-md-10">
+          <label for="reason" class="form-label fw-semibold">Reason for the request <span class="text-muted fw-normal">(optional)</span></label>
+          <textarea id="reason" name="reason" class="form-control" rows="2"
+                    placeholder="Briefly describe why this CallerID is being submitted for review..."></textarea>
         </div>
         <div class="col-md-2">
           <button type="submit" class="btn btn-primary w-100">

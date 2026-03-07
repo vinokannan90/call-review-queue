@@ -53,6 +53,7 @@ class CallerID(db.Model):
     submitted_at = db.Column(db.DateTime, nullable=False)
     # queued → assigned → dismissed (QA queue) | raised (admin review) | reviewed
     status = db.Column(db.String(20), nullable=False, default='queued', index=True)
+    reason = db.Column(db.String(500), nullable=True)
 
     assignments = db.relationship('Assignment', backref='caller_id_ref', lazy='dynamic')
 
