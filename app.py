@@ -139,7 +139,7 @@ def user_dashboard():
         'total': len(submissions),
         'queued': sum(1 for s in submissions if s.status == 'queued'),
         'assigned': sum(1 for s in submissions if s.status == 'assigned'),
-        'completed': sum(1 for s in submissions if s.status in ('dismissed', 'followup', 'reviewed')),
+        'completed': sum(1 for s in submissions if s.status in ('dismissed', 'raised', 'reviewed')),
     }
     return render_template('user_dashboard.html', submissions=submissions, stats=stats)
 
@@ -206,8 +206,8 @@ def admin_dashboard():
             'assigned_at': asn.assigned_at if asn else None,
         })
 
-    followup_items = (
-        CallerID.query.filter_by(status='followup')
+    raised_items = (
+        CallerID.query.filter_by(status='raised')
         .order_by(CallerID.submitted_at)
         .all()
     )
@@ -223,7 +223,7 @@ def admin_dashboard():
         'total': CallerID.query.count(),
         'queued': CallerID.query.filter_by(status='queued').count(),
         'assigned': CallerID.query.filter_by(status='assigned').count(),
-        'followup': CallerID.query.filter_by(status='followup').count(),
+        'raised': CallerID.query.filter_by(status='raised').count(),
         'dismissed': CallerID.query.filter_by(status='dismissed').count(),
         'eligible': TeamMember.query.filter_by(self_status='present', admin_approved=True).count(),
         'self_present': TeamMember.query.filter_by(self_status='present').count(),
@@ -235,7 +235,7 @@ def admin_dashboard():
         team_members=team_members,
         queued=queued,
         assigned_items=assigned_items,
-        followup_items=followup_items,
+        raised_items=raised_items,
         dismissed_items=dismissed_items,
         stats=stats,
     )
@@ -277,8 +277,8 @@ def mark_reviewed(caller_id_id):
         return redirect(url_for('dashboard'))
 
     caller = CallerID.query.get_or_404(caller_id_id)
-    if caller.status != 'followup':
-        flash('This CallerID is not in follow-up status.', 'warning')
+    if caller.status != 'raised':
+        flash('This CallerID is not in raised status.', 'warning')
         return redirect(url_for('admin_dashboard'))
 
     caller.status = 'reviewed'
@@ -408,15 +408,15 @@ def submit_outcome(assignment_id):
         return redirect(url_for('complaint_dashboard'))
 
     outcome = request.form.get('outcome', '').strip()
-    if outcome not in ('dismiss', 'followup'):
-        flash('Please select an outcome — Dismiss or Follow-up — before submitting.', 'danger')
+    if outcome not in ('dismiss', 'raised'):
+        flash('Please select an outcome — Dismiss or Raised — before submitting.', 'danger')
         return redirect(url_for('analyse_assignment', assignment_id=assignment_id))
 
     caller_number = assignment.caller_id_ref.caller_id_number
     assignment.status = 'completed'
     assignment.completed_at = datetime.now(timezone.utc)
     assignment.outcome = outcome
-    assignment.caller_id_ref.status = 'dismissed' if outcome == 'dismiss' else 'followup'
+    assignment.caller_id_ref.status = 'dismissed' if outcome == 'dismiss' else 'raised'
     db.session.flush()
 
     # If still eligible, immediately auto-assign next queued CallerID
@@ -425,7 +425,7 @@ def submit_outcome(assignment_id):
     else:
         db.session.commit()
 
-    outcome_label = 'sent to QA queue' if outcome == 'dismiss' else 'flagged for admin follow-up'
+    outcome_label = 'sent to QA queue' if outcome == 'dismiss' else 'raised for admin review'
     flash(f'CallerID {caller_number} {outcome_label}. You are ready for the next assignment.', 'success')
     return redirect(url_for('complaint_dashboard'))
 

@@ -85,16 +85,16 @@
               </label>
             </div>
 
-            <!-- Follow-up -->
-            <div class="form-check p-3 border rounded-2" id="followupCard">
+            <!-- Raised -->
+            <div class="form-check p-3 border rounded-2" id="raisedCard">
               <input class="form-check-input mt-1" type="radio" name="outcome"
-                     id="outcomeFollowup" value="followup" required>
-              <label class="form-check-label ms-2" for="outcomeFollowup">
+                     id="outcomeRaised" value="raised" required>
+              <label class="form-check-label ms-2" for="outcomeRaised">
                 <span class="fw-semibold d-block">
-                  <i class="bi bi-flag-fill me-1 text-danger"></i> Follow-up — Flag for Admin Review
+                  <i class="bi bi-flag-fill me-1 text-danger"></i> Raised — Flag for Admin Review
                 </span>
                 <span class="text-muted small">
-                  This caller needs follow-up action. Escalate to admin for review.
+                  This caller needs to be raised for admin review.
                 </span>
               </label>
             </div>
@@ -124,7 +124,7 @@
   // Highlight the selected outcome card visually
   document.querySelectorAll('input[name="outcome"]').forEach(function (radio) {
     radio.addEventListener('change', function () {
-      document.querySelectorAll('#dismissCard, #followupCard').forEach(function (card) {
+      document.querySelectorAll('#dismissCard, #raisedCard').forEach(function (card) {
         card.classList.remove('border-primary', 'bg-primary', 'bg-opacity-5');
       });
       if (this.checked) {

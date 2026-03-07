@@ -51,7 +51,7 @@ class CallerID(db.Model):
     aws_recording_url = db.Column(db.String(500), nullable=True)
     submitted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     submitted_at = db.Column(db.DateTime, nullable=False)
-    # queued → assigned → dismissed (QA queue) | followup (admin review) | reviewed
+    # queued → assigned → dismissed (QA queue) | raised (admin review) | reviewed
     status = db.Column(db.String(20), nullable=False, default='queued', index=True)
 
     assignments = db.relationship('Assignment', backref='caller_id_ref', lazy='dynamic')
@@ -66,5 +66,5 @@ class Assignment(db.Model):
     assigned_at = db.Column(db.DateTime, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(20), nullable=False, default='active')  # active | completed
-    # Outcome chosen by complaint member: None | dismiss | followup
+    # Outcome chosen by complaint member: None | dismiss | raised
     outcome = db.Column(db.String(20), nullable=True)
