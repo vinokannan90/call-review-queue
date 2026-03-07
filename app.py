@@ -415,11 +415,23 @@ def submit_outcome(assignment_id):
         flash('Please select an outcome — Dismiss or Raised — before submitting.', 'danger')
         return redirect(url_for('analyse_assignment', assignment_id=assignment_id))
 
+    core_id = None
+    raised_comment = None
+    if outcome == 'raised':
+        core_id = request.form.get('core_id', '').strip() or None
+        if not core_id:
+            flash('Please provide a CORE ID when raising a case.', 'danger')
+            return redirect(url_for('analyse_assignment', assignment_id=assignment_id))
+        raised_comment = request.form.get('raised_comment', '').strip() or None
+
     caller_number = assignment.caller_id_ref.caller_id_number
     assignment.status = 'completed'
     assignment.completed_at = datetime.now(timezone.utc)
     assignment.outcome = outcome
     assignment.caller_id_ref.status = 'dismissed' if outcome == 'dismiss' else 'raised'
+    if outcome == 'raised':
+        assignment.caller_id_ref.core_id = core_id
+        assignment.caller_id_ref.raised_comment = raised_comment
     if outcome == 'dismiss':
         qa_record = QAReview(
             caller_id_id=assignment.caller_id_id,

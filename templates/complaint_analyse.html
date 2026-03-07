@@ -94,17 +94,34 @@
             </div>
 
             <!-- Raised -->
-            <div class="form-check p-3 border rounded-2" id="raisedCard">
-              <input class="form-check-input mt-1" type="radio" name="outcome"
-                     id="outcomeRaised" value="raised" required>
-              <label class="form-check-label ms-2" for="outcomeRaised">
-                <span class="fw-semibold d-block">
-                  <i class="bi bi-flag-fill me-1 text-danger"></i> Raised — Flag for Admin Review
-                </span>
-                <span class="text-muted small">
-                  This caller needs to be raised for admin review.
-                </span>
-              </label>
+            <div class="p-3 border rounded-2" id="raisedCard">
+              <div class="form-check">
+                <input class="form-check-input mt-1" type="radio" name="outcome"
+                       id="outcomeRaised" value="raised" required>
+                <label class="form-check-label ms-2" for="outcomeRaised">
+                  <span class="fw-semibold d-block">
+                    <i class="bi bi-flag-fill me-1 text-danger"></i> Raised and sent to user
+                  </span>
+                  <span class="text-muted small">
+                    This caller will be raised and sent back to the user.
+                  </span>
+                </label>
+              </div>
+              <!-- CORE ID and comment — shown when Raised is selected -->
+              <div id="raisedFields" class="mt-3 d-none">
+                <div class="mb-3">
+                  <label for="core_id" class="form-label fw-semibold">
+                    CORE ID <span class="text-danger">*</span>
+                  </label>
+                  <input type="text" id="core_id" name="core_id" class="form-control"
+                         placeholder="Enter CORE ID">
+                </div>
+                <div>
+                  <label for="raised_comment" class="form-label fw-semibold">Description</label>
+                  <textarea id="raised_comment" name="raised_comment" class="form-control" rows="3"
+                            placeholder="Add a description or comment..."></textarea>
+                </div>
+              </div>
             </div>
 
           </div>
@@ -129,14 +146,26 @@
 
 {% block scripts %}
 <script>
-  // Highlight the selected outcome card visually
+  // Highlight the selected outcome card visually and show/hide CORE ID fields
   document.querySelectorAll('input[name="outcome"]').forEach(function (radio) {
     radio.addEventListener('change', function () {
       document.querySelectorAll('#dismissCard, #raisedCard').forEach(function (card) {
         card.classList.remove('border-primary', 'bg-primary', 'bg-opacity-5');
       });
-      if (this.checked) {
-        this.closest('.form-check').classList.add('border-primary', 'bg-primary', 'bg-opacity-5');
+      var cardId = this.value === 'dismiss' ? 'dismissCard' : 'raisedCard';
+      document.getElementById(cardId).classList.add('border-primary', 'bg-primary', 'bg-opacity-5');
+
+      // Show/hide CORE ID fields
+      var raisedFields = document.getElementById('raisedFields');
+      var coreIdInput = document.getElementById('core_id');
+      if (this.value === 'raised') {
+        raisedFields.classList.remove('d-none');
+        coreIdInput.required = true;
+      } else {
+        raisedFields.classList.add('d-none');
+        coreIdInput.required = false;
+        coreIdInput.value = '';
+        document.getElementById('raised_comment').value = '';
       }
     });
   });

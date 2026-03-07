@@ -92,6 +92,7 @@
             <th>AWS Recording</th>
             <th>Submitted At</th>
             <th>Status</th>
+            <th>CORE ID</th>
           </tr>
         </thead>
         <tbody>
@@ -125,6 +126,7 @@
                 <span class="badge status-completed"><i class="bi bi-check-circle me-1"></i>Completed</span>
               {% endif %}
             </td>
+            <td class="small font-monospace">{{ s.core_id or '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>

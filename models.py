@@ -54,6 +54,8 @@ class CallerID(db.Model):
     # queued → assigned → dismissed (QA queue) | raised (admin review) | reviewed
     status = db.Column(db.String(20), nullable=False, default='queued', index=True)
     reason = db.Column(db.String(500), nullable=True)
+    core_id = db.Column(db.String(100), nullable=True)
+    raised_comment = db.Column(db.Text, nullable=True)
 
     assignments = db.relationship('Assignment', backref='caller_id_ref', lazy='dynamic')
 

@@ -243,7 +243,6 @@
             <th>Submitted By</th>
             <th>Submitted At</th>
             <th>Recording</th>
-            <th class="text-center">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -258,14 +257,6 @@
                   <i class="bi bi-play-circle me-1"></i>Play
                 </a>
               {% else %}<span class="text-muted">—</span>{% endif %}
-            </td>
-            <td class="text-center">
-              <form method="POST" action="{{ url_for('mark_reviewed', caller_id_id=c.id) }}"
-                    onsubmit="return confirm('Mark CallerID {{ c.caller_id_number }} as reviewed?')">
-                <button type="submit" class="btn btn-sm btn-outline-success">
-                  <i class="bi bi-check2-circle me-1"></i> Mark Reviewed
-                </button>
-              </form>
             </td>
           </tr>
           {% endfor %}
