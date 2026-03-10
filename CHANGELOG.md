@@ -5,6 +5,30 @@ All notable changes to the Call Review Queue system will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-03-09
+
+### Added
+- **Admin Timer Reset Controls**: Reset buttons next to working and break timers on admin dashboard
+- **Clock-Out Time Display**: Shows when team members completed their shift
+- **Timer Freeze After Sign-Off**: Timers display final frozen values instead of disappearing
+- **Reset Timer Route**: New POST endpoint `/admin/reset_timer/<member_id>/<timer_type>` for admin control
+
+### Fixed
+- **Timer Visibility Bug**: Time tracking section now persists after team member signs off
+- **CSS Linter Errors**: Changed admin_reports.html display logic from inline Jinja style to Bootstrap classes
+- **Unused Import**: Removed unused `sqlalchemy.func` import from app.py
+
+### Changed
+- **JavaScript Timer Logic**: Now checks clock-out time to freeze timer updates when shift ends
+- **Admin Dashboard Display**: Removed `status != 'offline'` condition from attendance display
+- **Reset Confirmation**: Added confirmation prompt before executing timer resets
+
+### Security
+- Rate limiting applied to reset timer endpoint (30 requests per 60 seconds)
+- Admin role authorization required for all reset operations
+
+---
+
 ## [0.2.0] - 2026-03-09
 
 ### Added

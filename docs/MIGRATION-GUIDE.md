@@ -1,3 +1,401 @@
+# Migration Guide
+
+## v0.4.0 → v0.4.1 (Patch - No Database Changes)
+
+### Overview
+Simple code update with UX improvements for timer persistence and admin reset controls.
+
+✅ **No Breaking Changes**: Code-only update, no database schema changes required.
+
+### What's New in v0.4.1
+- Timer display persists after team member signs off
+- Admin can reset working/break timers via dashboard buttons
+- CSS linter errors fixed in admin_reports.html
+
+### Migration Steps
+
+#### Step 1: Update Code
+```powershell
+# Pull latest code
+git pull origin main
+
+# OR checkout tag
+git checkout v0.4.1
+```
+
+#### Step 2: Restart Application
+```powershell
+# Stop current Flask app (CTRL+C)
+
+# Start updated version
+python app.py
+```
+
+#### Step 3: Verify Changes
+1. Login as admin
+2. Navigate to admin dashboard
+3. Verify time tracking displays for signed-off members
+4. Test reset buttons next to working/break timers
+5. Check Reports page for CSS display issues (should be clean)
+
+**Total Downtime**: < 10 seconds (app restart only)
+
+---
+
+# Migration Guide: v0.3.0 → v0.4.0
+
+## Overview
+This guide helps you upgrade from v0.3.0 (Security Hardening) to v0.4.0 (Time Tracking & Performance Reports) with comprehensive attendance monitoring and reporting features.
+
+⚠️ **BREAKING CHANGES**: This release requires database schema update with new `attendance_logs` table. **All existing data will be lost** when resetting the database.
+
+## ⚠️ Breaking Changes Summary
+1. **Database schema change** - New `attendance_logs` table added (requires reset)
+2. **Data loss** - Existing CallerIDs, assignments, QA reviews, and attendance will be lost
+3. **Automatic time tracking** - All complaint team members now tracked automatically
+4. **No backward compatibility** - Cannot rollback to v0.3.0 without database restore
+
+## Prerequisites
+- Python environment activated (`.venv`)
+- Application stopped
+- `.env` file configured (from v0.3.0)
+- **BACKUP**: If you have production data you need to preserve, backup the database first
+
+## Migration Steps
+
+### Step 1: Backup Current Database (CRITICAL for Production)
+```powershell
+# For SQLite (default PoC setup)
+Copy-Item callreview_poc.db callreview_poc.db.backup_v0.3.0
+
+# For PostgreSQL (production)
+pg_dump callreview_prod > backup_v0.3.0_$(Get-Date -Format "yyyyMMdd_HHmmss").sql
+
+# Verify backup was created
+dir *backup*
+```
+
+**⚠️ WARNING**: Step 4 will delete all data. This backup is your only recovery option.
+
+### Step 2: Stop the Application
+```powershell
+# Stop Flask app if running
+# Press CTRL+C in terminal where app is running
+# Or kill the process
+Get-Process python | Where-Object {$_.Path -like "*call-review-queue*"} | Stop-Process
+```
+
+### Step 3: Update Code
+```powershell
+# Pull latest code
+git fetch origin
+git checkout v0.4.0
+
+# OR pull from branch
+git pull origin main
+```
+
+### Step 4: Reset Database (⚠️ **DATA LOSS**)
+```powershell
+# This will DELETE all data and recreate schema with new table
+python reset_db.py
+
+# When prompted:
+# "Are you sure you want to reset the database? (yes/no):"
+# Type: yes
+```
+
+**Expected output:**
+```
+Database reset successfully.
+Tables created: users, team_members, caller_ids, assignments, qa_reviews, attendance_logs
+```
+
+### Step 5: Reseed Demo Data
+```powershell
+# Populate with fresh demo data including users and test CallerIDs
+python seed.py
+```
+
+**Expected output:**
+```
+Seeding database...
+Created X users
+Created X team members
+Created X CallerIDs
+Database seeded successfully!
+```
+
+### Step 6: Verify Installation
+```powershell
+# Start application
+python app.py
+```
+
+**Expected output:**
+```
+2026-03-09 22:51:01 [WARNING] __main__: Starting application in DEVELOPMENT mode (debug enabled)
+ * Running on http://127.0.0.1:5000
+```
+
+### Step 7: Test Time Tracking Features
+Open http://127.0.0.1:5000 in browser and test:
+
+#### ✅ Test 1: Clock-In Tracking
+```
+1. Login as complaint member (tom.harris/Complaint@123)
+2. Click "Present" button
+3. Verify clock-in time appears (should show current time)
+4. Note: Timer won't show initially - requires admin approval first
+```
+
+#### ✅ Test 2: Admin Dashboard Timers
+```
+1. Open new browser tab/window (or use incognito)
+2. Login as admin (admin/Admin@123)
+3. Find tom.harris card in Team Availability section
+4. Click "Approve" button
+5. Verify time tracking info appears:
+   - Clock In: [current time]
+   - Working: 00:00:XX (running timer)
+   - Break: 00:00:00
+   - Processed: 0
+6. Wait 10 seconds and verify timer is updating
+```
+
+#### ✅ Test 3: Break Time Tracking
+```
+1. Switch back to tom.harris tab
+2 Click "Break" button
+3. Switch to admin tab
+4. Verify "Working" timer stopped updating
+5. Verify "Break" timer is now running
+6. Switch back to tom.harris tab
+7. Click "Present" button to return from break
+8. Switch to admin tab
+9. Verify "Working" timer resumed
+10. Verify "Break" shows accumulated time
+```
+
+#### ✅ Test 4: Performance Counter
+```
+1. As tom.harris, wait for a CallerID assignment (or manually assign via admin)
+2. Complete the assignment (dismiss or raise)
+3. Switch to admin tab
+4. Verify "Processed" counter incremented to 1
+```
+
+#### ✅ Test 5: Reports Page
+```
+1. As admin, click "Reports" button (in page header)
+2. Verify reports page loads
+3. Select "Today" filter
+4. Click "Generate Report"
+5. Verify tom.harris appears with:
+   - Total Processed: 1 (from Test 4)
+   - Working Time: [time worked]
+   - Raised/Dismissed breakdown
+6. Test other filters (This Week, This Month)
+```
+
+#### ✅ Test 6: Custom Date Range
+```
+1. On reports page, select "Custom Range" radio button
+2. Set start date = today
+3. Set end date = today
+4. Click "Generate Report"
+5. Verify same data as "Today" filter
+6. Try setting end date 15 days ahead
+7. Verify error: "Date range cannot exceed 14 days"
+```
+
+### Step 8: Sign Off Test
+```
+1. As tom.harris, click "Sign Off" button
+2. Confirm dialog
+3. Switch to admin tab
+4. Verify tom.harris card shows "SIGNED OFF" badge
+5. Verify time tracking section disappeared
+6. Check reports page again
+7. Verify working time frozen at sign-off time
+```
+
+## New Features Available in v0.4.0
+
+### For Administrators
+- **Real-time monitoring**: Live timers showing team activity
+- **Performance reports**: Comprehensive analytics by date range
+- **Attendance tracking**: Clock-in, clock-out, break times
+- **Productivity metrics**: CallerIDs processed counts
+- **Raised item analysis**: Detailed breakdown of escalated calls
+
+### For Complaint Team Members
+- **Automatic tracking**: No manual time entry required
+- **Transparent system**: Know that activity is monitored
+- **Fair break tracking**: All break time properly recorded
+
+## Troubleshooting
+
+### Issue: "Table 'attendance_logs' doesn't exist" error
+**Solution**:
+1. Verify you ran `python reset_db.py`
+2. Check database file was recreated
+3. Look for error messages during reset
+4. Try deleting database file manually and running reset again
+
+### Issue: Timers not updating on admin dashboard
+**Solution**:
+1. Check browser console (F12) for JavaScript errors
+2. Verify page loaded completely
+3. Hard refresh (Ctrl+Shift+R or Ctrl+F5)
+4. Ensure team member is clocked in (marked Present)
+
+### Issue: No data in reports
+**Solution**:
+1. Verify team members have clocked in today
+2. Check selected date range includes today
+3. Ensure some CallerIDs were processed
+4. Check database for attendance_logs: `SELECT * FROM attendance_logs;`
+
+### Issue: Reports show 0 working time
+**Solution**:
+1. Member must mark "Present" to clock in
+2. Admin must approve member
+3. Wait at least a few seconds for time to accumulate
+4. Refresh page to see updated times
+
+### Issue: Database reset fails
+**Solution**:
+1. Ensure app is stopped (no python processes running)
+2. Check file permissions
+3. Try manually deleting `callreview_poc.db` file
+4. Re-run `python reset_db.py`
+
+## Rollback Procedure (If Needed)
+
+If you encounter critical issues and need to rollback:
+
+```powershell
+# Stop application
+# Press CTRL+C
+
+# Checkout previous version
+git checkout v0.3.0
+
+# Restore database backup
+Copy-Item callreview_poc.db.backup_v0.3.0 callreview_poc.db -Force
+
+# For PostgreSQL:
+# psql callreview_prod < backup_v0.3.0_YYYYMMDD_HHMMSS.sql
+
+# Restart application
+python app.py
+```
+
+**Note**: You will lose all v0.4.0 features (time tracking, reports) when rolling back.
+
+## Database Schema Changes
+
+### New Table: attendance_logs
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Primary key |
+| team_member_id | INTEGER | FK to team_members (indexed) |
+| log_date | DATE | Date of attendance (indexed) |
+| clock_in_time | DATETIME | When marked Present |
+| clock_out_time | DATETIME | When marked Sign Off (nullable) |
+| total_break_seconds | INTEGER | Accumulated break time |
+| current_break_start | DATETIME | If on break now (nullable) |
+| callers_processed | INTEGER | Total completed today |
+| callers_dismissed | INTEGER | Dismissed count |
+| callers_raised | INTEGER | Raised count |
+| last_updated | DATETIME | Last modification time |
+
+**Constraints:**
+- UNIQUE(team_member_id, log_date) - One log per member per day
+
+## Production Deployment Notes
+
+For production environments:
+
+### Use Database Migrations (Alembic)
+```powershell
+# Install Alembic
+pip install alembic
+
+# Initialize (first time only)
+alembic init alembic
+
+# Create migration
+alembic revision --autogenerate -m "Add attendance_logs table"
+
+# Apply migration
+alembic upgrade head
+```
+
+### Data Preservation Strategy
+If you have production data to preserve:
+1. Export existing data to CSV/JSON
+2. Apply migration (creates new table, preserves old data)
+3. Map old data to new schema if needed
+4. Import preserved data
+
+### High-Availability Considerations
+- Schedule migration during maintenance window
+- Use blue-green deployment if possible
+- Test migration on staging environment first
+- Have rollback plan ready
+
+## Configuration Changes
+
+### No .env Changes Required
+This release uses existing configuration from v0.3.0:
+- SECRET_KEY remains the same
+- All session/security settings unchanged
+- No new environment variables
+
+### Optional: Adjust Rate Limits
+If reports generation causes performance issues:
+```python
+# In app.py, add rate limit to reports route
+@app.route('/admin/reports')
+@rate_limit(limit=10, window_seconds=60)  # 10 reports per minute
+```
+
+## Performance Considerations
+
+### Database Size
+- Each team member generates 1 attendance_log per working day
+- With 10 members working 250 days/year = 2,500 rows/year
+- Minimal storage impact for typical PoC usage
+
+### Report Query Performance
+- Indexed fields (log_date, team_member_id) ensure fast queries
+- 14-day limit on custom ranges prevents expensive queries
+- Aggregation done in Python (consider SQL aggregation for large datasets)
+
+### Timer Updates
+- JavaScript timer updates are client-side only
+- No server requests for timer display
+- No performance impact on server
+
+## Security Notes
+
+- Time tracking data is sensitive employee information
+- Ensure proper access controls (only admins can view reports)
+- Consider data retention policies for compliance
+- Audit logs track when reports are accessed (existing logging)
+
+## Getting Help
+
+- **Configuration Issues**: Check `.env` file and restart app
+- **Database Errors**: Review error messages during reset
+- **Feature Questions**: See RELEASE-NOTES.md for feature descriptions
+- **Bug Reports**: Include error messages and steps to reproduce
+
+---
+
 # Migration Guide: v0.2.0 → v0.3.0
 
 ## Overview

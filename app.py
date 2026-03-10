@@ -9,7 +9,7 @@ from flask_login import (LoginManager, current_user, login_required,
 from flask_wtf import CSRFProtect
 from werkzeug.security import check_password_hash
 
-from models import Assignment, CallerID, QAReview, TeamMember, User, db
+from models import Assignment, AttendanceLog, CallerID, QAReview, TeamMember, User, db
 from security_config import (
     InputValidator, 
     rate_limiter, 
@@ -446,6 +446,191 @@ def toggle_approval(member_id):
     return redirect(url_for('admin_dashboard'))
 
 
+@app.route('/admin/reports')
+@login_required
+@require_role('admin')
+def admin_reports():
+    """Generate performance reports for complaint team members."""
+    from datetime import date, timedelta
+    
+    # Get filter parameters
+    filter_type = request.args.get('filter', 'today')  # today, week, month, custom
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    # Calculate date range based on filter
+    today = date.today()
+    
+    if filter_type == 'today':
+        start_date = today
+        end_date = today
+        filter_label = 'Today'
+    elif filter_type == 'week':
+        start_date = today - timedelta(days=today.weekday())  # Monday of current week
+        end_date = today
+        filter_label = 'This Week'
+    elif filter_type == 'month':
+        start_date = today.replace(day=1)  # First day of current month
+        end_date = today
+        filter_label = 'This Month'
+    elif filter_type == 'custom' and start_date_str and end_date_str:
+        try:
+            start_date = date.fromisoformat(start_date_str)
+            end_date = date.fromisoformat(end_date_str)
+            
+            # Validate date range
+            if end_date < start_date:
+                flash('End date must be after start date.', 'danger')
+                return redirect(url_for('admin_reports'))
+            
+            # Limit custom range to 14 days
+            if (end_date - start_date).days > 14:
+                flash('Date range cannot exceed 14 days.', 'danger')
+                return redirect(url_for('admin_reports'))
+            
+            filter_label = f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d, %Y")}'
+        except ValueError:
+            flash('Invalid date format.', 'danger')
+            return redirect(url_for('admin_reports'))
+    else:
+        # Default to today if invalid filter
+        start_date = today
+        end_date = today
+        filter_label = 'Today'
+        filter_type = 'today'
+    
+    # Query attendance logs for the date range
+    attendance_logs = (
+        AttendanceLog.query
+        .filter(AttendanceLog.log_date >= start_date)
+        .filter(AttendanceLog.log_date <= end_date)
+        .join(TeamMember)
+        .join(User)
+        .order_by(User.name, AttendanceLog.log_date)
+        .all()
+    )
+    
+    # Aggregate data by team member
+    member_data = {}
+    for log in attendance_logs:
+        member_id = log.team_member_id
+        if member_id not in member_data:
+            member_data[member_id] = {
+                'member': log.team_member,
+                'total_processed': 0,
+                'total_dismissed': 0,
+                'total_raised': 0,
+                'total_working_seconds': 0,
+                'total_break_seconds': 0,
+                'days_worked': 0,
+                'raised_details': []
+            }
+        
+        member_data[member_id]['total_processed'] += log.callers_processed
+        member_data[member_id]['total_dismissed'] += log.callers_dismissed
+        member_data[member_id]['total_raised'] += log.callers_raised
+        member_data[member_id]['days_worked'] += 1
+        
+        # Calculate working time for this day
+        if log.clock_out_time:
+            total_time = (log.clock_out_time - log.clock_in_time).total_seconds()
+            working_time = total_time - log.total_break_seconds
+            member_data[member_id]['total_working_seconds'] += working_time
+            member_data[member_id]['total_break_seconds'] += log.total_break_seconds
+        elif log.clock_in_time:
+            # Still clocked in - calculate up to now
+            total_time = (datetime.now(timezone.utc) - log.clock_in_time).total_seconds()
+            current_break = log.total_break_seconds
+            if log.current_break_start:
+                current_break += (datetime.now(timezone.utc) - log.current_break_start).total_seconds()
+            working_time = total_time - current_break
+            member_data[member_id]['total_working_seconds'] += working_time
+            member_data[member_id]['total_break_seconds'] += current_break
+    
+    # Get raised CallerID details for the date range
+    raised_callers = (
+        CallerID.query
+        .join(Assignment)
+        .filter(Assignment.status == 'completed')
+        .filter(Assignment.outcome == 'raised')
+        .filter(Assignment.completed_at >= datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc))
+        .filter(Assignment.completed_at <= datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc))
+        .all()
+    )
+    
+    # Add raised details to member data
+    for caller in raised_callers:
+        # Find the assignment that raised this caller
+        assignment = (
+            Assignment.query
+            .filter_by(caller_id_id=caller.id, outcome='raised')
+            .order_by(Assignment.completed_at.desc())
+            .first()
+        )
+        if assignment:
+            member_id = assignment.team_member_id
+            if member_id in member_data:
+                member_data[member_id]['raised_details'].append({
+                    'caller_id': caller.caller_id_number,
+                    'core_id': caller.core_id,
+                    'comment': caller.raised_comment,
+                    'completed_at': assignment.completed_at
+                })
+    
+    # Convert to list and sort by total processed
+    report_data = list(member_data.values())
+    report_data.sort(key=lambda x: x['total_processed'], reverse=True)
+    
+    return render_template(
+        'admin_reports.html',
+        report_data=report_data,
+        filter_type=filter_type,
+        filter_label=filter_label,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@app.route('/admin/reset_timer/<int:member_id>/<timer_type>', methods=['POST'])
+@login_required
+@require_role('admin')
+@rate_limit(limit=30, window_seconds=60)
+def reset_timer(member_id, timer_type):
+    """Reset working or break timer for a team member"""
+    from datetime import datetime, timezone
+    
+    if timer_type not in ['working', 'break']:
+        return jsonify({'success': False, 'error': 'Invalid timer type'}), 400
+    
+    member = TeamMember.query.get_or_404(member_id)
+    attendance = member.today_attendance
+    
+    if not attendance:
+        return jsonify({'success': False, 'error': 'No attendance record found for today'}), 404
+    
+    try:
+        if timer_type == 'working':
+            # Reset working timer: set clock_in to now, keep break times
+            attendance.clock_in_time = datetime.now(timezone.utc)
+            # If member is currently on break, reset break start time as well
+            if attendance.current_break_start:
+                attendance.current_break_start = datetime.now(timezone.utc)
+        else:  # break
+            # Reset break timer: clear all break data
+            attendance.total_break_seconds = 0
+            if attendance.current_break_start:
+                # If currently on break, restart it from now
+                attendance.current_break_start = datetime.now(timezone.utc)
+        
+        attendance.last_updated = datetime.now(timezone.utc)
+        db.session.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/admin/mark_reviewed/<int:caller_id_id>', methods=['POST'])
 @login_required
 @require_role('admin')
@@ -579,14 +764,33 @@ def complaint_dashboard():
 @require_role('complaint')
 @rate_limit(limit=30, window_seconds=60)
 def update_self_status():
+    from datetime import date
     member = TeamMember.query.filter_by(user_id=current_user.id).first_or_404()
     new_status = InputValidator.sanitize_string(request.form.get('status', ''), 20)
 
     if new_status not in ('present', 'break', 'signoff'):
         flash('Invalid status.', 'danger')
         return redirect(url_for('complaint_dashboard'))
+    
+    # Get or create today's attendance log
+    today = date.today()
+    attendance = AttendanceLog.query.filter_by(
+        team_member_id=member.id,
+        log_date=today
+    ).first()
 
     if new_status == 'signoff':
+        # Clock out and finalize break time
+        if attendance and attendance.current_break_start:
+            # If currently on break, calculate and add final break duration
+            break_duration = (datetime.now(timezone.utc) - attendance.current_break_start).total_seconds()
+            attendance.total_break_seconds += int(break_duration)
+            attendance.current_break_start = None
+        
+        if attendance:
+            attendance.clock_out_time = datetime.now(timezone.utc)
+            attendance.last_updated = datetime.now(timezone.utc)
+        
         # Return any active assignment to queue — another member will pick it up
         active = member.active_assignment
         if active:
@@ -611,6 +815,11 @@ def update_self_status():
         return redirect(url_for('complaint_dashboard'))
 
     if new_status == 'break':
+        # Start break timer
+        if attendance and not attendance.current_break_start:
+            attendance.current_break_start = datetime.now(timezone.utc)
+            attendance.last_updated = datetime.now(timezone.utc)
+        
         member.self_status = 'break'
         db.session.commit()
         logger.info(f"Member on break - User: {current_user.username}")
@@ -622,6 +831,24 @@ def update_self_status():
         return redirect(url_for('complaint_dashboard'))
 
     # new_status == 'present' (returning from break or starting a new shift)
+    if not attendance:
+        # First time marking present today - create attendance log
+        attendance = AttendanceLog(
+            team_member_id=member.id,
+            log_date=today,
+            clock_in_time=datetime.now(timezone.utc),
+            last_updated=datetime.now(timezone.utc)
+        )
+        db.session.add(attendance)
+        logger.info(f"Member clocked in - User: {current_user.username}")
+    elif attendance.current_break_start:
+        # Returning from break - calculate break duration
+        break_duration = (datetime.now(timezone.utc) - attendance.current_break_start).total_seconds()
+        attendance.total_break_seconds += int(break_duration)
+        attendance.current_break_start = None
+        attendance.last_updated = datetime.now(timezone.utc)
+        logger.info(f"Member returned from break - User: {current_user.username} - Break duration: {int(break_duration)}s")
+    
     member.self_status = 'present'
     db.session.flush()
     if member.admin_approved:
@@ -720,6 +947,16 @@ def submit_outcome(assignment_id):
             )
             db.session.add(qa_record)
             logger.info(f"CallerID dismissed - User: {current_user.username} - CallerID: {caller_number}")
+        
+        # Update attendance log with processed caller count
+        attendance = member.today_attendance
+        if attendance:
+            attendance.callers_processed += 1
+            if outcome == 'dismiss':
+                attendance.callers_dismissed += 1
+            else:  # outcome == 'raised'
+                attendance.callers_raised += 1
+            attendance.last_updated = datetime.now(timezone.utc)
         
         db.session.flush()
 

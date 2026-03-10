@@ -5,7 +5,12 @@
 <!-- Page Header -->
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
-    <h4 class="fw-bold mb-0"><i class="bi bi-shield-check text-danger me-2"></i>Admin Control Panel</h4>
+    <h4 class="fw-bold mb-0">
+      <i class="bi bi-shield-check text-danger me-2"></i>Admin Control Panel
+      <a href="{{ url_for('admin_reports') }}" class="btn btn-sm btn-outline-primary ms-3">
+        <i class="bi bi-bar-chart-line me-1"></i>Reports
+      </a>
+    </h4>
     <p class="text-muted small mb-0">
       Approve complaint members &middot; Monitor the review queue &middot; Handle raised items
       <span class="text-success ms-2"><i class="bi bi-arrow-clockwise"></i> Auto-refreshes every 30s</span>
@@ -105,6 +110,65 @@
                 <span class="badge bg-secondary">OFFLINE</span>
               {% endif %}
             </div>
+            
+            <!-- Time Tracking Info -->
+            {% set attendance = member.today_attendance %}
+            {% if attendance %}
+              <div class="small mb-2 text-start border-top pt-2">
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted"><i class="bi bi-clock me-1"></i>Clock In:</span>
+                  <span class="fw-semibold">{{ attendance.clock_in_time.strftime('%H:%M') }}</span>
+                </div>
+                {% if attendance.clock_out_time %}
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="text-muted"><i class="bi bi-clock-history me-1"></i>Clock Out:</span>
+                  <span class="fw-semibold">{{ attendance.clock_out_time.strftime('%H:%M') }}</span>
+                </div>
+                {% endif %}
+                <div class="d-flex justify-content-between mb-1 align-items-center">
+                  <span class="text-muted"><i class="bi bi-stopwatch me-1"></i>Working:</span>
+                  <div class="d-flex align-items-center gap-1">
+                    <span class="fw-semibold timer-display" 
+                          data-clock-in="{{ attendance.clock_in_time.isoformat() }}"
+                          data-clock-out="{{ attendance.clock_out_time.isoformat() if attendance.clock_out_time else '' }}"
+                          data-break-seconds="{{ attendance.total_break_seconds }}"
+                          data-on-break="{{ 'true' if attendance.current_break_start else 'false' }}"
+                          data-break-start="{{ attendance.current_break_start.isoformat() if attendance.current_break_start else '' }}">
+                      --:--:--
+                    </span>
+                    <button class="btn btn-sm btn-outline-danger p-0 px-1" 
+                            style="font-size: 0.7rem; line-height: 1;"
+                            onclick="resetTimer({{ member.id }}, 'working')"
+                            title="Reset working timer">
+                      <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between mb-1 align-items-center">
+                  <span class="text-muted"><i class="bi bi-pause-circle me-1"></i>Break:</span>
+                  <div class="d-flex align-items-center gap-1">
+                    <span class="fw-semibold break-display"
+                          data-clock-out="{{ attendance.clock_out_time.isoformat() if attendance.clock_out_time else '' }}"
+                          data-break-seconds="{{ attendance.total_break_seconds }}"
+                          data-on-break="{{ 'true' if attendance.current_break_start else 'false' }}"
+                          data-break-start="{{ attendance.current_break_start.isoformat() if attendance.current_break_start else '' }}">
+                      --:--:--
+                    </span>
+                    <button class="btn btn-sm btn-outline-danger p-0 px-1" 
+                            style="font-size: 0.7rem; line-height: 1;"
+                            onclick="resetTimer({{ member.id }}, 'break')"
+                            title="Reset break timer">
+                      <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between">
+                  <span class="text-muted"><i class="bi bi-check2-all me-1"></i>Processed:</span>
+                  <span class="badge bg-info">{{ attendance.callers_processed }}</span>
+                </div>
+              </div>
+            {% endif %}
+            
             {% if member.active_assignment %}
               <div class="small text-info mb-2">
                 <i class="bi bi-headphones me-1"></i>
@@ -488,5 +552,93 @@
       container.remove();
     }, 3000);
   }
+
+  // Timer update function
+  function formatTime(totalSeconds) {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  function updateTimers() {
+    const now = new Date();
+    
+    // Update working time timers
+    document.querySelectorAll('.timer-display').forEach(timer => {
+      const clockInStr = timer.dataset.clockIn;
+      if (!clockInStr) return;
+      
+      const clockOutStr = timer.dataset.clockOut;
+      const clockIn = new Date(clockInStr);
+      const baseBreakSeconds = parseInt(timer.dataset.breakSeconds) || 0;
+      const onBreak = timer.dataset.onBreak === 'true';
+      const breakStartStr = timer.dataset.breakStart;
+      
+      // If clocked out, use frozen time
+      const endTime = clockOutStr ? new Date(clockOutStr) : now;
+      
+      // Calculate total elapsed time
+      const totalElapsed = Math.floor((endTime - clockIn) / 1000);
+      
+      // Calculate current break time
+      let currentBreakTime = baseBreakSeconds;
+      if (onBreak && breakStartStr && !clockOutStr) {
+        const breakStart = new Date(breakStartStr);
+        const currentBreakDuration = Math.floor((now - breakStart) / 1000);
+        currentBreakTime += currentBreakDuration;
+      }
+      
+      // Working time = Total elapsed - Break time
+      const workingTime = totalElapsed - currentBreakTime;
+      timer.textContent = formatTime(Math.max(0, workingTime));
+    });
+    
+    // Update break time displays
+    document.querySelectorAll('.break-display').forEach(breakTimer => {
+      const clockOutStr = breakTimer.dataset.clockOut;
+      const baseBreakSeconds = parseInt(breakTimer.dataset.breakSeconds) || 0;
+      const onBreak = breakTimer.dataset.onBreak === 'true';
+      const breakStartStr = breakTimer.dataset.breakStart;
+      
+      let totalBreakTime = baseBreakSeconds;
+      if (onBreak && breakStartStr && !clockOutStr) {
+        const breakStart = new Date(breakStartStr);
+        const currentBreakDuration = Math.floor((now - breakStart) / 1000);
+        totalBreakTime += currentBreakDuration;
+      }
+      
+      breakTimer.textContent = formatTime(totalBreakTime);
+    });
+  }
+
+  function resetTimer(memberId, timerType) {
+    if (!confirm(`Are you sure you want to reset the ${timerType} timer?`)) {
+      return;
+    }
+    
+    fetch(`/admin/reset_timer/${memberId}/${timerType}`, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': '{{ csrf_token() }}'
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        location.reload();
+      } else {
+        alert('Failed to reset timer: ' + (data.error || 'Unknown error'));
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      alert('Failed to reset timer');
+    });
+  }
+
+  // Initialize timers immediately and then update every second
+  updateTimers();
+  setInterval(updateTimers, 1000);
 </script>
 {% endblock %}

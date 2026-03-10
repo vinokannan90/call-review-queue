@@ -53,6 +53,21 @@ class TeamMember(db.Model):
     def can_receive_manual_assignment(self):
         """True if member can receive manual assignments (present/break and < 3 reserved)."""
         return self.self_status in ('present', 'break') and self.reserved_count < 3
+    
+    @property
+    def today_attendance(self):
+        """Get today's attendance log for this member, or None if not clocked in."""
+        from datetime import date
+        return AttendanceLog.query.filter_by(
+            team_member_id=self.id,
+            log_date=date.today()
+        ).first()
+    
+    @property
+    def is_clocked_in(self):
+        """True if member has clocked in today and not yet clocked out."""
+        log = self.today_attendance
+        return log is not None and log.clock_out_time is None
 
 
 class CallerID(db.Model):
@@ -109,3 +124,36 @@ class QAReview(db.Model):
     caller_id_ref = db.relationship('CallerID', backref=db.backref('qa_reviews', lazy='dynamic'))
     dismissed_by = db.relationship('User', foreign_keys=[dismissed_by_id])
     reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_id])
+
+
+class AttendanceLog(db.Model):
+    """Daily attendance tracking for complaint team members."""
+    __tablename__ = 'attendance_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_member_id = db.Column(db.Integer, db.ForeignKey('team_members.id'), nullable=False, index=True)
+    log_date = db.Column(db.Date, nullable=False, index=True)  # Date of attendance (for reporting)
+    
+    # Time tracking
+    clock_in_time = db.Column(db.DateTime, nullable=False)  # When marked "Present"
+    clock_out_time = db.Column(db.DateTime, nullable=True)  # When marked "Sign Off" or end of day
+    
+    # Break tracking
+    total_break_seconds = db.Column(db.Integer, default=0, nullable=False)  # Accumulated break time
+    current_break_start = db.Column(db.DateTime, nullable=True)  # When current break started (null = not on break)
+    
+    # Performance tracking
+    callers_processed = db.Column(db.Integer, default=0, nullable=False)  # CallerIDs completed today
+    callers_dismissed = db.Column(db.Integer, default=0, nullable=False)  # Dismissed count
+    callers_raised = db.Column(db.Integer, default=0, nullable=False)  # Raised count
+    
+    # Metadata
+    last_updated = db.Column(db.DateTime, nullable=False)
+    
+    # Relationships
+    team_member = db.relationship('TeamMember', backref=db.backref('attendance_logs', lazy='dynamic'))
+    
+    # Unique constraint: one log per team member per day
+    __table_args__ = (
+        db.UniqueConstraint('team_member_id', 'log_date', name='uix_member_date'),
+    )

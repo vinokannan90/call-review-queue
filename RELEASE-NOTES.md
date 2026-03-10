@@ -1,3 +1,299 @@
+# Release Notes - v0.4.1
+
+**Release Date**: March 9, 2026  
+**Release Type**: Patch Release - UX Improvements & Bug Fixes
+
+## 🎯 Overview
+
+This patch release improves the time tracking UX by fixing timer visibility after sign-off and adding admin reset controls. No database changes required - simple code update.
+
+## ✨ What's New
+
+### 1. Persistent Timer Display
+**Problem**: Working and break timers disappeared when team members signed off, preventing admins from seeing final shift times.
+
+**Solution**: 
+- Time tracking section now **always visible** when attendance record exists
+- **Clock-out time** displayed after sign-off
+- Timers show **frozen final values** instead of disappearing
+- Clear visual indication of shift completion
+
+### 2. Admin Timer Reset Controls
+**Feature**: Administrators can now reset working and break timers from the dashboard.
+
+**Capabilities**:
+- **Reset buttons** next to working and break timers on each team member card
+- **Working timer reset**: Sets clock-in to current time, preserves break data
+- **Break timer reset**: Clears accumulated break time to zero
+- **Confirmation prompt**: Prevents accidental resets
+- **Rate limited**: 30 reset operations per 60 seconds for security
+
+### 3. Template Linter Fix
+**Issue**: CSS linter errors in admin_reports.html from Jinja2 template syntax in inline styles.
+
+**Fix**: Changed from inline style with Jinja conditional to Bootstrap's `d-none` class, eliminating false-positive linter errors.
+
+## 📋 What's Changed
+
+### Modified Files
+- `templates/admin_dashboard.html`
+  - Removed `status != 'offline'` condition from time tracking display
+  - Added clock-out time display when available
+  - Added reset buttons with icons next to timers
+  - Updated JavaScript to freeze timers after clock-out
+  - Added `resetTimer()` function with fetch API
+
+- `templates/admin_reports.html`
+  - Changed display logic from inline Jinja style to Bootstrap class
+  - Eliminated CSS linter false-positive errors
+
+- `app.py`
+  - New route: `POST /admin/reset_timer/<member_id>/<timer_type>`
+  - Reset logic for working timer (reset clock-in, preserve breaks)
+  - Reset logic for break timer (clear accumulated time)
+  - Rate limiting applied (30 requests per 60 seconds)
+  - Removed unused `sqlalchemy.func` import
+
+### New Routes
+- `POST /admin/reset_timer/<int:member_id>/<timer_type>` - Reset working or break timer
+  - Parameters: `member_id` (int), `timer_type` ('working' or 'break')
+  - Returns: JSON response with success/error status
+  - Authorization: Admin role required
+
+## 🔧 Technical Details
+
+### Timer Freeze Logic
+JavaScript now checks for `data-clock-out` attribute:
+- If present: Use clock-out time as end time (frozen)
+- If absent: Use current time (live updating)
+- Break calculations respect clock-out state
+
+### Reset Behavior
+**Working Timer Reset**:
+```python
+attendance.clock_in_time = datetime.now(timezone.utc)
+# Preserves: total_break_seconds, clock_out_time cleared
+# If on break: current_break_start also reset to now
+```
+
+**Break Timer Reset**:
+```python
+attendance.total_break_seconds = 0
+# If on break: current_break_start reset to now (fresh break)
+```
+
+## ⚙️ Migration
+
+**No database changes** - Simple code update:
+```powershell
+git pull origin main
+# OR
+git checkout v0.4.1
+
+# Restart application
+python app.py
+```
+
+## 🐛 Bug Fixes
+- Fixed timers disappearing when team members sign off
+- Fixed CSS linter false-positive errors in admin_reports.html template
+- Removed unused `sqlalchemy.func` import that was causing linter warnings
+
+## 📚 Documentation
+- Updated CHANGELOG.md with v0.4.1 changes
+- Updated MIGRATION-GUIDE.md with v0.4.1 upgrade path
+- Updated RELEASE-NOTES.md with detailed feature descriptions
+
+---
+
+# Release Notes - v0.4.0
+
+**Release Date**: March 9, 2026  
+**Release Type**: Time Tracking & Performance Reports Feature Release (Breaking Changes)
+
+## 🎯 Overview
+
+This release introduces **Comprehensive Time Tracking and Performance Reporting** features designed for operational monitoring and team management. Administrators can now track team member attendance, monitor working hours, break times, and view detailed performance reports with customizable date ranges.
+
+⚠️ **BREAKING CHANGE**: This release requires database schema update with new `attendance_logs` table. Existing deployments must reset and reseed the database.
+
+## ⏱️ Time Tracking Features
+
+### 1. Automated Attendance Logging
+Complete clock-in/clock-out system for complaint team members:
+- **Automatic clock-in** when marking status as "Present" for the first time each day
+- **Break time tracking** with start/stop timestamps and accumulated duration
+- **Automatic clock-out** when marking status as "Sign Off"
+- **Daily reset** - fresh attendance log created each day
+
+### 2. Real-Time Dashboard Monitoring
+Admin dashboard now displays live metrics for each clocked-in team member:
+- **Clock-in time** - When the member started their shift today
+- **Working time timer** - Running clock showing net working hours (excluding breaks)
+- **Break time counter** - Total break duration for the day
+- **Callers processed** - Number of CallerIDs handled today
+- **Auto-updating timers** - JavaScript updates every second without page refresh
+
+### 3. Performance Counters
+Automatic tracking of work completion:
+- **Total processed** - Count of all CallerIDs completed
+- **Dismissed count** - CallerIDs sent to QA queue
+- **Raised count** - CallerIDs escalated to admin
+- **Per-day tracking** - Counters reset at start of each shift
+
+## 📊 Performance Reports
+
+### 1. Team Performance Dashboard
+New dedicated Reports page accessible from admin dashboard:
+- **Quick access** via "Reports" button in admin panel header
+- **Clean interface** focused on performance metrics and analysis
+- **Back navigation** to return to main admin dashboard
+
+### 2. Flexible Date Filtering
+Multiple filter options for report generation:
+- **Today** - Current day's performance
+- **This Week** - Monday to today
+- **This Month** - First day of month to today
+- **Custom Range** - User-defined date range (1-14 days maximum)
+- **Date validation** - Prevents invalid ranges and excessive periods
+
+### 3. Comprehensive Metrics Per Team Member
+Detailed performance breakdown for each complaint team member:
+- **Total CallerIDs processed** - Overall volume handled
+- **Dismissed vs Raised breakdown** - Split by outcome type
+- **Working time summary** - Total hours and minutes worked
+- **Days worked** - Number of days in the reporting period
+- **Trend analysis** - Compare performance across different periods
+
+### 4. Raised CallerID Details
+Expandable accordion sections showing:
+- **CallerID numbers** - Full list of raised callers
+- **CORE IDs** - Associated complaint identifiers
+- **Comments/Descriptions** - Reason for escalation
+- **Completion timestamps** - When each item was raised
+- **Sortable table** - Organized by completion time (newest first)
+
+## 📋 What's Changed
+
+### New Database Table
+- `attendance_logs` table with columns:
+  - `team_member_id`, `log_date` (unique constraint per member per day)
+  - `clock_in_time`, `clock_out_time`
+  - `total_break_seconds`, `current_break_start`
+  - `callers_processed`, `callers_dismissed`, `callers_raised`
+  - `last_updated`
+
+### Modified Files
+- `models.py` - Added `AttendanceLog` model and helper properties to `TeamMember`
+- `app.py` - Updated status change logic and added `/admin/reports` route
+- `templates/admin_dashboard.html` - Added time tracking display and running timers
+- `templates/admin_reports.html` (NEW) - Complete reports interface
+
+### New Routes
+- `GET /admin/reports` - Performance reports page with filtering
+- Query parameters: `filter`, `start_date`, `end_date`
+
+## ⚠️ Breaking Changes
+
+### 1. Database Schema Update (REQUIRED)
+**Action Required**: Reset and reseed database
+
+```powershell
+# Backup existing data if needed (PoC - no real production data)
+
+# Reset database to create new table
+python reset_db.py
+# Type 'yes' when prompted
+
+# Reseed demo data
+python seed.py
+```
+
+**Impact**: All existing CallerIDs, assignments, and attendance data will be lost. For production deployments, use proper database migrations (e.g., Alembic).
+
+### 2. Time Tracking Active for Complaint Role
+All complaint team members now have attendance tracked:
+- **Clock-in required** - First "Present" status each day creates attendance log
+- **Break tracking** - All break periods automatically recorded
+- **Performance metrics** - All completed CallerIDs tracked and counted
+
+## 🔧 Technical Improvements
+
+### Data Model
+- Added `AttendanceLog` model with comprehensive time tracking fields
+- Unique constraint on `(team_member_id, log_date)` prevents duplicates
+- Efficient querying with indexed fields for reports
+
+### Business Logic
+- `update_self_status()` enhanced with attendance logging
+- `submit_outcome()` updated to increment performance counters
+- Break time calculation handles ongoing and completed breaks
+- Working time excludes all break periods for accurate metrics
+
+### User Interface
+- JavaScript timer update function runs every second
+- `formatTime()` utility converts seconds to HH:MM:SS format
+- Working time = Total elapsed - Break time (dynamic calculation)
+- Break time includes current break if ongoing
+
+### Report Generation
+- Date range validation (max 14 days for custom ranges)
+- Aggregation across multiple days per team member
+- Efficient SQLAlchemy queries with joins
+- Raised CallerID details linked via assignments
+
+## 📚 Features by Role
+
+### For Administrators
+- **Dashboard monitoring**: View real-time team member activity
+- **Time tracking visibility**: See who's working, on break, total hours
+- **Performance reports**: Generate and analyze team performance
+- **Date range flexibility**: Reports for any period up to 14 days
+- **Raised item tracking**: Review all escalated CallerIDs with details
+
+### For Complaint Team Members
+- **Automatic time tracking**: No manual time entry required
+- **Transparent monitoring**: Know that activity is tracked
+- **Performance visibility**: View own processed count on dashboard (future enhancement)
+
+### For System Operators
+- **Automated data collection**: No manual reporting needed
+- **Historical data**: Attendance logs preserved for analysis
+- **Scalable architecture**: Ready for multi-week/multi-month reports
+
+## 🐛 Bug Fixes
+
+- Fixed break time calculation when member is currently on break
+- Fixed working time to properly exclude all break periods
+- Added validation to prevent date range abuse (14-day limit)
+
+## 📈 Performance & Scalability
+
+- Indexed `log_date` and `team_member_id` for fast report queries
+- Aggregation done in Python to avoid complex SQL
+- Unique constraint prevents duplicate attendance logs
+- Efficient timer updates using client-side JavaScript
+
+## 🚀 Future Enhancements
+
+Potential additions for v0.5.0+:
+- Export reports to CSV/PDF
+- Charts and graphs for visual analytics
+- Week-over-week comparison
+- Individual team member detailed view
+- Attendance calendar view
+- Overtime calculation and alerts
+
+## 📝 Notes
+
+- **Clock-in time**: Captured when member first marks "Present" each day
+- **Clock-out time**: Set when member marks "Sign Off" or end of shift
+- **Break tracking**: Automatic start/stop when status changes to/from "Break"
+- **Daily reset**: New attendance log created for each new day
+- **Time zones**: All timestamps use UTC via `timezone.utc`
+
+---
+
 # Release Notes - v0.3.0
 
 **Release Date**: March 9, 2026  
