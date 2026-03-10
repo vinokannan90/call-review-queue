@@ -1,13 +1,23 @@
 import os
+import logging
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, url_for, jsonify
 from flask_login import (LoginManager, current_user, login_required,
                          login_user, logout_user)
+from flask_wtf import CSRFProtect
 from werkzeug.security import check_password_hash
 
 from models import Assignment, CallerID, QAReview, TeamMember, User, db
+from security_config import (
+    InputValidator, 
+    rate_limiter, 
+    rate_limit, 
+    require_role,
+    get_security_headers,
+    validate_security_config
+)
 
 load_dotenv()
 
@@ -23,23 +33,114 @@ def get_version():
 __version__ = get_version()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-secret-change-in-prod')
+
+# ---------------------------------------------------------------------------
+# Security Configuration
+# ---------------------------------------------------------------------------
+
+# Load SECRET_KEY from environment (REQUIRED for production)
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key or secret_key == 'dev-only-secret-change-in-prod':
+    if os.environ.get('FLASK_ENV') == 'production':
+        raise ValueError("SECRET_KEY must be set in production environment")
+    # Development fallback (will show warning)
+    secret_key = 'dev-only-secret-change-in-prod'
+    print("[WARNING] Using default SECRET_KEY. Set SECRET_KEY environment variable for production.")
+
+app.config['SECRET_KEY'] = secret_key
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     'DATABASE_URL', 'sqlite:///callreview_poc.db'
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-db.init_app(app)
+# Session Security
+app.config['SESSION_COOKIE_HTTPONLY'] = os.environ.get('SESSION_COOKIE_HTTPONLY', 'True').lower() == 'true'
+app.config['SESSION_COOKIE_SAMESITE'] = os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax')
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'False').lower() == 'true'
+app.config['PERMANENT_SESSION_LIFETIME'] = int(os.environ.get('PERMANENT_SESSION_LIFETIME', '3600'))  # 1 hour
 
+# Request size limit (prevent large payload attacks)
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH', str(16 * 1024 * 1024)))  # 16MB
+
+# WTF/CSRF Configuration
+app.config['WTF_CSRF_ENABLED'] = True
+app.config['WTF_CSRF_TIME_LIMIT'] = None  # CSRF tokens don't expire (use session expiry)
+app.config['WTF_CSRF_CHECK_DEFAULT'] = True
+
+# Initialize extensions
+db.init_app(app)
+csrf = CSRFProtect(app)
+
+# Configure logging
+log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# Flask-Login configuration
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Please log in to access this page.'
 login_manager.login_message_category = 'warning'
+login_manager.session_protection = 'strong'  # Protect against session hijacking
 
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+
+# ---------------------------------------------------------------------------
+# Security Headers & Request/Response Hooks
+# ---------------------------------------------------------------------------
+
+@app.after_request
+def set_security_headers(response):
+    """Apply security headers to all responses."""
+    headers = get_security_headers()
+    for header, value in headers.items():
+        response.headers[header] = value
+    return response
+
+
+@app.before_request
+def log_request_info():
+    """Log security-relevant request information."""
+    if request.endpoint and not request.endpoint.startswith('static'):
+        logger.info(f"{request.method} {request.path} - User: {current_user.username if current_user.is_authenticated else 'Anonymous'} - IP: {request.remote_addr}")
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """Handle rate limit exceeded errors."""
+    logger.warning(f"Rate limit exceeded - IP: {request.remote_addr} - Endpoint: {request.endpoint}")
+    flash('Too many requests. Please try again later.', 'danger')
+    return render_template('login.html'), 429
+
+
+@app.errorhandler(403)
+def forbidden_handler(e):
+    """Handle forbidden errors."""
+    logger.warning(f"Forbidden access - User: {current_user.username if current_user.is_authenticated else 'Anonymous'} - IP: {request.remote_addr}")
+    flash('Access denied.', 'danger')
+    return redirect(url_for('dashboard' if current_user.is_authenticated else 'login'))
+
+
+@app.errorhandler(404)
+def not_found_handler(e):
+    """Handle not found errors (prevent information disclosure)."""
+    return render_template('login.html'), 404
+
+
+@app.errorhandler(500)
+def internal_error_handler(e):
+    """Handle internal server errors (prevent information disclosure)."""
+    logger.error(f"Internal server error: {str(e)}", exc_info=True)
+    flash('An internal error occurred. Please try again later.', 'danger')
+    return redirect(url_for('dashboard' if current_user.is_authenticated else 'login'))
 
 
 # Make version available to all templates
@@ -121,17 +222,31 @@ def index():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@rate_limit(limit=10, window_seconds=300)  # 10 attempts per 5 minutes
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
+    
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
+        username = InputValidator.sanitize_string(request.form.get('username', ''), 80)
         password = request.form.get('password', '')
+        
+        if not username or not password:
+            logger.warning(f"Login attempt with missing credentials - IP: {request.remote_addr}")
+            flash('Invalid username or password.', 'danger')
+            return render_template('login.html')
+        
         user = User.query.filter_by(username=username).first()
+        
         if user and check_password_hash(user.password_hash, password):
-            login_user(user)
+            login_user(user, remember=False)
+            rate_limiter.reset(request.remote_addr)  # Reset rate limit on successful login
+            logger.info(f"Successful login - User: {username} - IP: {request.remote_addr}")
             return redirect(url_for('dashboard'))
+        
+        logger.warning(f"Failed login attempt - Username: {username} - IP: {request.remote_addr}")
         flash('Invalid username or password.', 'danger')
+    
     return render_template('login.html')
 
 
@@ -161,10 +276,8 @@ def dashboard():
 
 @app.route('/user/dashboard')
 @login_required
+@require_role('user')
 def user_dashboard():
-    if current_user.role != 'user':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
     submissions = (
         CallerID.query
         .filter_by(submitted_by_id=current_user.id)
@@ -182,36 +295,63 @@ def user_dashboard():
 
 @app.route('/user/submit', methods=['POST'])
 @login_required
+@require_role('user', 'qa')
+@rate_limit(limit=30, window_seconds=60)  # 30 submissions per minute
 def submit_caller_id():
-    if current_user.role not in ('user', 'qa'):
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
+    """Submit a new CallerID with input validation."""
+    caller_id_number = InputValidator.sanitize_string(
+        request.form.get('caller_id', ''), 
+        InputValidator.MAX_CALLER_ID_LENGTH
+    )
+    aws_url = InputValidator.sanitize_string(
+        request.form.get('aws_url', ''), 
+        InputValidator.MAX_URL_LENGTH
+    )
+    reason = InputValidator.sanitize_string(
+        request.form.get('reason', ''), 
+        InputValidator.MAX_REASON_LENGTH
+    )
 
-    caller_id_number = request.form.get('caller_id', '').strip()
-    aws_url = request.form.get('aws_url', '').strip() or None
-    reason = request.form.get('reason', '').strip() or None
-
-    if not caller_id_number:
-        flash('CallerID is required.', 'danger')
+    # Validate CallerID
+    is_valid, error_msg = InputValidator.validate_caller_id(caller_id_number)
+    if not is_valid:
+        flash(error_msg, 'danger')
+        logger.warning(f"Invalid CallerID submission - User: {current_user.username} - Error: {error_msg}")
         return redirect(url_for('qa_dashboard' if current_user.role == 'qa' else 'user_dashboard'))
+    
+    # Validate URL if provided
+    if aws_url:
+        is_valid, error_msg = InputValidator.validate_url(aws_url, required=False)
+        if not is_valid:
+            flash(error_msg, 'danger')
+            logger.warning(f"Invalid URL submission - User: {current_user.username} - Error: {error_msg}")
+            return redirect(url_for('qa_dashboard' if current_user.role == 'qa' else 'user_dashboard'))
 
+    # Check for duplicates
     if CallerID.query.filter_by(caller_id_number=caller_id_number).first():
         flash(f'CallerID {caller_id_number} has already been submitted.', 'warning')
         return redirect(url_for('qa_dashboard' if current_user.role == 'qa' else 'user_dashboard'))
 
-    new_entry = CallerID(
-        caller_id_number=caller_id_number,
-        aws_recording_url=aws_url,
-        reason=reason,
-        submitted_by_id=current_user.id,
-        submitted_at=datetime.now(timezone.utc),
-        status='queued',
-    )
-    db.session.add(new_entry)
-    db.session.flush()
-    assign_queued_caller_ids()
-
-    flash(f'CallerID {caller_id_number} submitted and queued for assignment.', 'success')
+    try:
+        new_entry = CallerID(
+            caller_id_number=caller_id_number,
+            aws_recording_url=aws_url or None,
+            reason=reason or None,
+            submitted_by_id=current_user.id,
+            submitted_at=datetime.now(timezone.utc),
+            status='queued',
+        )
+        db.session.add(new_entry)
+        db.session.flush()
+        assign_queued_caller_ids()
+        
+        logger.info(f"CallerID submitted - User: {current_user.username} - CallerID: {caller_id_number}")
+        flash(f'CallerID {caller_id_number} submitted and queued for assignment.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error submitting CallerID - User: {current_user.username} - Error: {str(e)}")
+        flash('An error occurred while submitting. Please try again.', 'danger')
+    
     if current_user.role == 'qa':
         return redirect(url_for('qa_dashboard'))
     return redirect(url_for('user_dashboard'))
@@ -223,11 +363,8 @@ def submit_caller_id():
 
 @app.route('/admin/dashboard')
 @login_required
+@require_role('admin')
 def admin_dashboard():
-    if current_user.role != 'admin':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     team_members = TeamMember.query.join(User).order_by(User.name).all()
 
     queued = (
@@ -283,11 +420,9 @@ def admin_dashboard():
 
 @app.route('/admin/toggle_approval/<int:member_id>', methods=['POST'])
 @login_required
+@require_role('admin')
+@rate_limit(limit=60, window_seconds=60)
 def toggle_approval(member_id):
-    if current_user.role != 'admin':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     member = TeamMember.query.get_or_404(member_id)
 
     if not member.admin_approved:
@@ -300,10 +435,12 @@ def toggle_approval(member_id):
             return redirect(url_for('admin_dashboard'))
         member.admin_approved = True
         assign_queued_caller_ids()  # commits
+        logger.info(f"Member approved - Admin: {current_user.username} - Member: {member.user.username}")
         flash(f'{member.user.name} approved — eligible to receive CallerID assignments.', 'success')
     else:
         member.admin_approved = False
         db.session.commit()
+        logger.info(f"Member approval removed - Admin: {current_user.username} - Member: {member.user.username}")
         flash(f'{member.user.name} approval removed.', 'secondary')
 
     return redirect(url_for('admin_dashboard'))
@@ -311,11 +448,9 @@ def toggle_approval(member_id):
 
 @app.route('/admin/mark_reviewed/<int:caller_id_id>', methods=['POST'])
 @login_required
+@require_role('admin')
+@rate_limit(limit=60, window_seconds=60)
 def mark_reviewed(caller_id_id):
-    if current_user.role != 'admin':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     caller = CallerID.query.get_or_404(caller_id_id)
     if caller.status != 'raised':
         flash('This CallerID is not in raised status.', 'warning')
@@ -323,68 +458,94 @@ def mark_reviewed(caller_id_id):
 
     caller.status = 'reviewed'
     db.session.commit()
+    logger.info(f"CallerID marked reviewed - Admin: {current_user.username} - CallerID: {caller.caller_id_number}")
     flash(f'CallerID {caller.caller_id_number} marked as reviewed.', 'success')
     return redirect(url_for('admin_dashboard'))
 
 
 @app.route('/admin/assign_manual/<int:caller_id_id>/<int:member_id>', methods=['POST'])
 @login_required
+@require_role('admin')
+@rate_limit(limit=120, window_seconds=60)  # 120 drag-drop operations per minute
+@csrf.exempt  # AJAX endpoint - CSRF handled by custom header check
 def assign_manual(caller_id_id, member_id):
-    if current_user.role != 'admin':
-        return {'success': False, 'message': 'Access denied'}, 403
+    # Verify AJAX request (additional security layer)
+    if not request.is_json and request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+        logger.warning(f"Invalid manual assignment request - Admin: {current_user.username}")
+        return jsonify({'success': False, 'message': 'Invalid request'}), 400
 
     caller = CallerID.query.get_or_404(caller_id_id)
     member = TeamMember.query.get_or_404(member_id)
 
     # Validate CallerID is queued and not already reserved
     if caller.status != 'queued':
-        return {'success': False, 'message': 'CallerID is not in queued status'}, 400
+        return jsonify({'success': False, 'message': 'CallerID is not in queued status'}), 400
     
     if caller.reserved_for_member_id is not None:
-        return {'success': False, 'message': 'CallerID is already reserved for another team member'}, 400
+        return jsonify({'success': False, 'message': 'CallerID is already reserved for another team member'}), 400
 
     # Validate team member can receive manual assignment
     if member.self_status not in ('present', 'break'):
-        return {'success': False, 'message': f'{member.user.name} is not available (status: {member.self_status})'}, 400
+        return jsonify({'success': False, 'message': f'{member.user.name} is not available (status: {member.self_status})'}), 400
     
     if member.reserved_count >= 3:
-        return {'success': False, 'message': f'{member.user.name} already has 3 CallerIDs reserved'}, 400
+        return jsonify({'success': False, 'message': f'{member.user.name} already has 3 CallerIDs reserved'}), 400
 
-    # Assign manually
-    caller.reserved_for_member_id = member.id
-    caller.reserved_at = datetime.now(timezone.utc)
-    caller.reserved_by_id = current_user.id
-    db.session.commit()
-
-    return {
-        'success': True, 
-        'message': f'CallerID {caller.caller_id_number} reserved for {member.user.name}',
-        'reserved_count': member.reserved_count
-    }
+    try:
+        # Assign manually
+        caller.reserved_for_member_id = member.id
+        caller.reserved_at = datetime.now(timezone.utc)
+        caller.reserved_by_id = current_user.id
+        db.session.commit()
+        
+        logger.info(f"Manual assignment - Admin: {current_user.username} - CallerID: {caller.caller_id_number} - Member: {member.user.username}")
+        
+        return jsonify({
+            'success': True, 
+            'message': f'CallerID {caller.caller_id_number} reserved for {member.user.name}',
+            'reserved_count': member.reserved_count
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in manual assignment - Error: {str(e)}")
+        return jsonify({'success': False, 'message': 'An error occurred'}), 500
 
 
 @app.route('/admin/unassign_manual/<int:caller_id_id>', methods=['POST'])
 @login_required
+@require_role('admin')
+@rate_limit(limit=120, window_seconds=60)
+@csrf.exempt  # AJAX endpoint - CSRF handled by custom header check
 def unassign_manual(caller_id_id):
-    if current_user.role != 'admin':
-        return {'success': False, 'message': 'Access denied'}, 403
+    # Verify AJAX request
+    if not request.is_json and request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+        logger.warning(f"Invalid unassignment request - Admin: {current_user.username}")
+        return jsonify({'success': False, 'message': 'Invalid request'}), 400
 
     caller = CallerID.query.get_or_404(caller_id_id)
 
     if caller.reserved_for_member_id is None:
-        return {'success': False, 'message': 'CallerID is not manually reserved'}, 400
+        return jsonify({'success': False, 'message': 'CallerID is not manually reserved'}), 400
 
-    # Clear reservation
-    member_name = caller.reserved_for.user.name
-    caller.reserved_for_member_id = None
-    caller.reserved_at = None
-    caller.reserved_by_id = None
-    db.session.commit()
-
-    return {
-        'success': True,
-        'message': f'CallerID {caller.caller_id_number} reservation removed from {member_name}'
-    }
+    try:
+        # Clear reservation
+        member_name = caller.reserved_for.user.name
+        member_username = caller.reserved_for.user.username
+        caller.reserved_for_member_id = None
+        caller.reserved_at = None
+        caller.reserved_by_id = None
+        db.session.commit()
+        
+        logger.info(f"Manual unassignment - Admin: {current_user.username} - CallerID: {caller.caller_id_number} - Member: {member_username}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'CallerID {caller.caller_id_number} reservation removed from {member_name}'
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in manual unassignment - Error: {str(e)}")
+        return jsonify({'success': False, 'message': 'An error occurred'}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -393,11 +554,8 @@ def unassign_manual(caller_id_id):
 
 @app.route('/complaint/dashboard')
 @login_required
+@require_role('complaint')
 def complaint_dashboard():
-    if current_user.role != 'complaint':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     member = TeamMember.query.filter_by(user_id=current_user.id).first_or_404()
     assignment = member.active_assignment
     history = (
@@ -418,13 +576,11 @@ def complaint_dashboard():
 
 @app.route('/complaint/status', methods=['POST'])
 @login_required
+@require_role('complaint')
+@rate_limit(limit=30, window_seconds=60)
 def update_self_status():
-    if current_user.role != 'complaint':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     member = TeamMember.query.filter_by(user_id=current_user.id).first_or_404()
-    new_status = request.form.get('status', '').strip()
+    new_status = InputValidator.sanitize_string(request.form.get('status', ''), 20)
 
     if new_status not in ('present', 'break', 'signoff'):
         flash('Invalid status.', 'danger')
@@ -450,12 +606,14 @@ def update_self_status():
         member.admin_approved = False
         member.self_status = 'signoff'
         db.session.commit()
+        logger.info(f"Member signed off - User: {current_user.username}")
         flash('You have signed off for this shift. See you next time!', 'info')
         return redirect(url_for('complaint_dashboard'))
 
     if new_status == 'break':
         member.self_status = 'break'
         db.session.commit()
+        logger.info(f"Member on break - User: {current_user.username}")
         flash(
             'You are on break. Complete your current assignment if you have one. '
             'No new CallerIDs will be assigned while you are on break.',
@@ -468,9 +626,11 @@ def update_self_status():
     db.session.flush()
     if member.admin_approved:
         assign_queued_caller_ids()  # commits
+        logger.info(f"Member marked present (approved) - User: {current_user.username}")
         flash('You are Present and eligible for assignments.', 'success')
     else:
         db.session.commit()
+        logger.info(f"Member marked present (awaiting approval) - User: {current_user.username}")
         flash(
             'You are marked Present. Waiting for admin approval before assignments begin.',
             'info',
@@ -480,15 +640,13 @@ def update_self_status():
 
 @app.route('/complaint/analyse/<int:assignment_id>')
 @login_required
+@require_role('complaint')
 def analyse_assignment(assignment_id):
-    if current_user.role != 'complaint':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     member = TeamMember.query.filter_by(user_id=current_user.id).first_or_404()
     assignment = Assignment.query.get_or_404(assignment_id)
 
     if assignment.team_member_id != member.id:
+        logger.warning(f"Unauthorized assignment access - User: {current_user.username} - Assignment: {assignment_id}")
         flash('You are not authorized to access this assignment.', 'danger')
         return redirect(url_for('complaint_dashboard'))
 
@@ -501,15 +659,14 @@ def analyse_assignment(assignment_id):
 
 @app.route('/complaint/submit/<int:assignment_id>', methods=['POST'])
 @login_required
+@require_role('complaint')
+@rate_limit(limit=60, window_seconds=60)
 def submit_outcome(assignment_id):
-    if current_user.role != 'complaint':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     member = TeamMember.query.filter_by(user_id=current_user.id).first_or_404()
     assignment = Assignment.query.get_or_404(assignment_id)
 
     if assignment.team_member_id != member.id:
+        logger.warning(f"Unauthorized outcome submission - User: {current_user.username} - Assignment: {assignment_id}")
         flash('You are not authorized to submit this assignment.', 'danger')
         return redirect(url_for('complaint_dashboard'))
 
@@ -517,45 +674,68 @@ def submit_outcome(assignment_id):
         flash('This assignment is no longer active.', 'warning')
         return redirect(url_for('complaint_dashboard'))
 
-    outcome = request.form.get('outcome', '').strip()
+    outcome = InputValidator.sanitize_string(request.form.get('outcome', ''), 20)
+    
     if outcome not in ('dismiss', 'raised'):
         flash('Please select an outcome — Dismiss or Raised — before submitting.', 'danger')
         return redirect(url_for('analyse_assignment', assignment_id=assignment_id))
 
     core_id = None
     raised_comment = None
+    
     if outcome == 'raised':
-        core_id = request.form.get('core_id', '').strip() or None
-        if not core_id:
-            flash('Please provide a CORE ID when raising a case.', 'danger')
-            return redirect(url_for('analyse_assignment', assignment_id=assignment_id))
-        raised_comment = request.form.get('raised_comment', '').strip() or None
-
-    caller_number = assignment.caller_id_ref.caller_id_number
-    assignment.status = 'completed'
-    assignment.completed_at = datetime.now(timezone.utc)
-    assignment.outcome = outcome
-    assignment.caller_id_ref.status = 'dismissed' if outcome == 'dismiss' else 'raised'
-    if outcome == 'raised':
-        assignment.caller_id_ref.core_id = core_id
-        assignment.caller_id_ref.raised_comment = raised_comment
-    if outcome == 'dismiss':
-        qa_record = QAReview(
-            caller_id_id=assignment.caller_id_id,
-            dismissed_by_id=current_user.id,
-            dismissed_at=datetime.now(timezone.utc),
+        core_id = InputValidator.sanitize_string(
+            request.form.get('core_id', ''), 
+            InputValidator.MAX_CORE_ID_LENGTH
         )
-        db.session.add(qa_record)
-    db.session.flush()
+        
+        # Validate CORE ID
+        is_valid, error_msg = InputValidator.validate_core_id(core_id)
+        if not is_valid:
+            flash(error_msg, 'danger')
+            return redirect(url_for('analyse_assignment', assignment_id=assignment_id))
+        
+        raised_comment = InputValidator.sanitize_string(
+            request.form.get('raised_comment', ''), 
+            InputValidator.MAX_COMMENT_LENGTH
+        )
 
-    # If still eligible, immediately auto-assign next queued CallerID
-    if member.is_eligible:
-        assign_queued_caller_ids()  # commits
-    else:
-        db.session.commit()
+    try:
+        caller_number = assignment.caller_id_ref.caller_id_number
+        assignment.status = 'completed'
+        assignment.completed_at = datetime.now(timezone.utc)
+        assignment.outcome = outcome
+        assignment.caller_id_ref.status = 'dismissed' if outcome == 'dismiss' else 'raised'
+        
+        if outcome == 'raised':
+            assignment.caller_id_ref.core_id = core_id
+            assignment.caller_id_ref.raised_comment = raised_comment or None
+            logger.info(f"CallerID raised - User: {current_user.username} - CallerID: {caller_number} - CORE ID: {core_id}")
+        
+        if outcome == 'dismiss':
+            qa_record = QAReview(
+                caller_id_id=assignment.caller_id_id,
+                dismissed_by_id=current_user.id,
+                dismissed_at=datetime.now(timezone.utc),
+            )
+            db.session.add(qa_record)
+            logger.info(f"CallerID dismissed - User: {current_user.username} - CallerID: {caller_number}")
+        
+        db.session.flush()
 
-    outcome_label = 'sent to QA queue' if outcome == 'dismiss' else 'raised for admin review'
-    flash(f'CallerID {caller_number} {outcome_label}. You are ready for the next assignment.', 'success')
+        # If still eligible, immediately auto-assign next queued CallerID
+        if member.is_eligible:
+            assign_queued_caller_ids()  # commits
+        else:
+            db.session.commit()
+
+        outcome_label = 'sent to QA queue' if outcome == 'dismiss' else 'raised for admin review'
+        flash(f'CallerID {caller_number} {outcome_label}. You are ready for the next assignment.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error submitting outcome - User: {current_user.username} - Error: {str(e)}")
+        flash('An error occurred while submitting. Please try again.', 'danger')
+    
     return redirect(url_for('complaint_dashboard'))
 
 
@@ -565,11 +745,8 @@ def submit_outcome(assignment_id):
 
 @app.route('/qa/dashboard')
 @login_required
+@require_role('qa')
 def qa_dashboard():
-    if current_user.role != 'qa':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     # Get submissions by this QA user
     submissions = (
         CallerID.query
@@ -602,47 +779,82 @@ def qa_dashboard():
 
 @app.route('/qa/submit/<int:qa_review_id>', methods=['POST'])
 @login_required
+@require_role('qa')
+@rate_limit(limit=60, window_seconds=60)
 def qa_submit(qa_review_id):
-    if current_user.role != 'qa':
-        flash('Access denied.', 'danger')
-        return redirect(url_for('dashboard'))
-
     review = QAReview.query.get_or_404(qa_review_id)
+    
     if review.verdict is not None:
         flash('This case has already been reviewed.', 'warning')
         return redirect(url_for('qa_dashboard'))
 
-    verdict = request.form.get('verdict', '').strip()
-    justification = request.form.get('justification', '').strip() or None
+    verdict = InputValidator.sanitize_string(request.form.get('verdict', ''), 20)
+    justification = InputValidator.sanitize_string(
+        request.form.get('justification', ''), 
+        InputValidator.MAX_JUSTIFICATION_LENGTH
+    )
 
     if verdict not in ('required', 'not_required'):
         flash('Please select a verdict — Required or Not Required.', 'danger')
         return redirect(url_for('qa_dashboard'))
 
-    if not justification:
-        flash('Please provide a justification before submitting.', 'danger')
+    # Validate justification
+    is_valid, error_msg = InputValidator.validate_text_field(
+        justification, 
+        'Justification', 
+        InputValidator.MAX_JUSTIFICATION_LENGTH, 
+        required=True
+    )
+    if not is_valid:
+        flash(error_msg, 'danger')
         return redirect(url_for('qa_dashboard'))
 
-    review.verdict = verdict
-    review.justification = justification
-    review.reviewed_by_id = current_user.id
-    review.reviewed_at = datetime.now(timezone.utc)
+    try:
+        review.verdict = verdict
+        review.justification = justification
+        review.reviewed_by_id = current_user.id
+        review.reviewed_at = datetime.now(timezone.utc)
 
-    caller = review.caller_id_ref
-    caller_number = caller.caller_id_number
+        caller = review.caller_id_ref
+        caller_number = caller.caller_id_number
 
-    if verdict == 'required':
-        caller.status = 'queued'
-        db.session.flush()
-        assign_queued_caller_ids()  # commits
-        flash(f'CallerID {caller_number} marked as Required — re-queued for complaint review.', 'success')
-    else:
-        caller.status = 'qa_not_required'
-        db.session.commit()
-        flash(f'CallerID {caller_number} marked as Not Required — case closed.', 'success')
+        if verdict == 'required':
+            caller.status = 'queued'
+            db.session.flush()
+            assign_queued_caller_ids()  # commits
+            logger.info(f"QA verdict: Required - QA: {current_user.username} - CallerID: {caller_number}")
+            flash(f'CallerID {caller_number} marked as Required — re-queued for complaint review.', 'success')
+        else:
+            caller.status = 'qa_not_required'
+            db.session.commit()
+            logger.info(f"QA verdict: Not Required - QA: {current_user.username} - CallerID: {caller_number}")
+            flash(f'CallerID {caller_number} marked as Not Required — case closed.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error submitting QA review - User: {current_user.username} - Error: {str(e)}")
+        flash('An error occurred while submitting. Please try again.', 'danger')
 
     return redirect(url_for('qa_dashboard'))
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Security check on startup
+    with app.app_context():
+        issues = validate_security_config(app)
+        if issues:
+            print("\n" + "="*60)
+            print("SECURITY CONFIGURATION WARNINGS:")
+            print("="*60)
+            for issue in issues:
+                print(f"  • {issue}")
+            print("="*60 + "\n")
+    
+    # Determine if we should run in debug mode
+    debug_mode = os.environ.get('FLASK_ENV', 'development') == 'development'
+    
+    if not debug_mode:
+        logger.info("Starting application in PRODUCTION mode")
+    else:
+        logger.warning("Starting application in DEVELOPMENT mode (debug enabled)")
+    
+    app.run(debug=debug_mode, port=5000, host='127.0.0.1')

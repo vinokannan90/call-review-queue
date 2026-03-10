@@ -50,20 +50,41 @@ See [CHANGELOG.md](CHANGELOG.md) for complete release notes.
 
 ## Setup Instructions (Windows ARM / Any Platform)
 
-### 1. Set Up the Environment
+### 1. Set Up the Environment & Security
+
+**⚠️ IMPORTANT FOR ENTERPRISE DEMO:** This PoC includes enterprise-grade security controls.
 
 Copy the environment file template:
-```
+```powershell
 copy .env.example .env
 ```
 
-The default `.env` is pre-configured for SQLite — **no edits needed** to run the PoC.
+**Generate a secure SECRET_KEY:**
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
 
-```
-# Default .env for PoC (SQLite — zero install)
+Edit `.env` and replace the SECRET_KEY with your generated value:
+```ini
+# .env file
 DATABASE_URL=sqlite:///callreview_poc.db
-SECRET_KEY=replace-with-any-long-random-string
+SECRET_KEY=your-generated-secret-key-here
+FLASK_ENV=development
+SESSION_COOKIE_HTTPONLY=True
+SESSION_COOKIE_SAMESITE=Lax
+PERMANENT_SESSION_LIFETIME=3600
 ```
+
+**🔒 Security Features Included:**
+- ✅ CSRF Protection (Flask-WTF)
+- ✅ Rate Limiting (10 login attempts per 5 min)
+- ✅ Input Validation & Sanitization
+- ✅ Security Headers (CSP, X-Frame-Options, etc.)
+- ✅ Audit Logging (all security events)
+- ✅ Role-Based Access Control (RBAC)
+- ✅ Session Security (HTTPOnly, SameSite, timeout)
+
+See [docs/SECURITY-SETUP-GUIDE.md](docs/SECURITY-SETUP-GUIDE.md) for complete security documentation.
 
 ---
 
@@ -197,18 +218,43 @@ assignments     — id, caller_id_id (FK), team_member_id (FK),
 
 ## Important: Production Requirements
 
-This is a Proof of Concept. Before production use, the following must be addressed:
+## Security & Production Readiness
 
-- [ ] **CSRF Protection** — Add Flask-WTF to protect all forms
-- [ ] **HTTPS** — Deploy behind a TLS-terminated reverse proxy (nginx / Azure App Gateway)
-- [ ] **Secret Key** — Generate a cryptographically strong `SECRET_KEY` (not the default)
-- [ ] **Database Password** — Use a strong PostgreSQL password and environment variables
-- [ ] **SELECT FOR UPDATE** — Add row-level locking in `assign_queued_caller_ids()` to prevent
-      race conditions under high concurrency (see comment in app.py)
-- [ ] **Authentication** — Consider replacing password login with Azure AD SSO via `msal`
-- [ ] **Audit Logging** — Add a log table for all user actions (required for finance domain)
-- [ ] **Role Enforcement Middleware** — Use a decorator for role checks instead of per-route checks
-- [ ] **Production WSGI Server** — Use `gunicorn` instead of Flask's built-in dev server
+### ✅ Security Controls Implemented (v0.2.0)
+
+This PoC includes **enterprise-grade security** suitable for customer demonstrations:
+
+- [x] **CSRF Protection** — Flask-WTF protects all forms and AJAX endpoints
+- [x] **Rate Limiting** — Login (10/5min), submissions (30/min), admin actions (60/min)
+- [x] **Input Validation** — Comprehensive validation on all user inputs (see security_config.py)
+- [x] **Security Headers** — CSP, X-Frame-Options, X-XSS-Protection, HSTS-ready
+- [x] **Audit Logging** — All security events logged (logins, failures, violations, admin actions)
+- [x] **Role-Based Access Control** — Decorator-based authorization (@require_role)
+- [x] **Session Security** — HTTPOnly, SameSite, configurable timeout, strong protection
+- [x] **SQL Injection Protection** — SQLAlchemy ORM with parameterized queries
+- [x] **XSS Protection** — Jinja2 auto-escaping + CSP headers
+- [x] **Error Handling** — Generic error pages prevent information disclosure
+
+**Security Documentation:**
+- [Security Hardening Report](docs/SECURITY-HARDENING-REPORT.md) - Complete security audit
+- [Security Setup Guide](docs/SECURITY-SETUP-GUIDE.md) - Configuration and deployment
+
+### 🚀 Production Deployment Checklist
+
+Before deploying to production, complete these steps:
+
+- [ ] **HTTPS** — Deploy behind Azure App Service (auto HTTPS) or TLS-terminated nginx/App Gateway
+- [ ] **Secret Key** — Generate cryptographically strong SECRET_KEY with `secrets.token_hex(32)`
+- [ ] **Environment Config** — Set FLASK_ENV=production, SESSION_COOKIE_SECURE=True
+- [ ] **Database** — Switch to PostgreSQL (Azure SQL Database or managed PostgreSQL)
+- [ ] **Rate Limiting** — Replace in-memory limiter with Redis-backed Flask-Limiter
+- [ ] **Authentication** — Integrate Azure AD B2C or SSO via MSAL (recommended)
+- [ ] **Logging** — Forward logs to Azure Monitor, Splunk, or SIEM
+- [ ] **Monitoring** — Set up health checks and alerting
+- [ ] **WSGI Server** — Use `gunicorn` or `waitress` instead of Flask dev server
+- [ ] **SELECT FOR UPDATE** — Add row-level locking in `assign_queued_caller_ids()` for high concurrency
+
+**Current Status:** ✅ Ready for enterprise PoC demonstration | ⚠️ Requires production hardening for live deployment
 
 ---
 

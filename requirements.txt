@@ -1,6 +1,7 @@
 Flask==3.0.3
 Flask-Login==0.6.3
 Flask-SQLAlchemy==3.1.1
+Flask-WTF==1.2.1  # CSRF protection
 python-dotenv==1.0.1
 Werkzeug==3.0.3
 # psycopg2-binary is required when connecting to PostgreSQL in production.

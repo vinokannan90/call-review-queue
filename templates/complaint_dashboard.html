@@ -22,6 +22,7 @@
     <div class="d-flex flex-wrap gap-2 align-items-center">
       <!-- Present -->
       <form method="POST" action="{{ url_for('update_self_status') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="status" value="present">
         <button type="submit"
           class="btn {% if member.self_status == 'present' %}btn-success{% else %}btn-outline-success{% endif %} px-4">
@@ -32,6 +33,7 @@
 
       <!-- Break -->
       <form method="POST" action="{{ url_for('update_self_status') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="status" value="break">
         <button type="submit"
           class="btn {% if member.self_status == 'break' %}btn-warning{% else %}btn-outline-warning{% endif %} px-4">
@@ -42,8 +44,7 @@
 
       <!-- Sign Off -->
       <form method="POST" action="{{ url_for('update_self_status') }}"
-            onsubmit="return confirm('Sign off for this shift?\n\nAny active assignment will be returned to the queue and admin approval will be reset.')">
-        <input type="hidden" name="status" value="signoff">
+            onsubmit="return confirm('Sign off for this shift?\n\nAny active assignment will be returned to the queue and admin approval will be reset.')">        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>        <input type="hidden" name="status" value="signoff">
         <button type="submit"
           class="btn {% if member.self_status == 'signoff' %}btn-secondary{% else %}btn-outline-secondary{% endif %} px-4">
           <i class="bi bi-box-arrow-right me-2"></i>Sign Off

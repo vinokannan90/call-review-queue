@@ -48,6 +48,7 @@
   </div>
   <div class="card-body">
     <form method="POST" action="{{ url_for('submit_caller_id') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <div class="row g-3">
         <div class="col-md-4">
           <label for="caller_id" class="form-label fw-semibold">CallerID Number <span class="text-danger">*</span></label>
@@ -199,8 +200,7 @@
         <!-- Verdict Form -->
         <hr class="my-3">
         <form method="POST" action="{{ url_for('qa_submit', qa_review_id=review.id) }}"
-              onsubmit="return confirm('Submit QA verdict for CallerID {{ review.caller_id_ref.caller_id_number }}?')">
-
+              onsubmit="return confirm('Submit QA verdict for CallerID {{ review.caller_id_ref.caller_id_number }}?')">          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
           <div class="row g-3 align-items-start">
 
             <!-- Verdict options -->

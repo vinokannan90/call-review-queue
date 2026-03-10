@@ -72,6 +72,7 @@
       </div>
       <div class="card-body">
         <form method="POST" action="{{ url_for('submit_outcome', assignment_id=assignment.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
           <p class="text-muted small mb-3">
             Select an outcome for CallerID
             <span class="font-monospace fw-bold text-dark">{{ assignment.caller_id_ref.caller_id_number }}</span>:
