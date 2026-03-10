@@ -28,7 +28,7 @@
             <div class="text-muted small">Submitted by</div>
             <div class="fw-semibold">{{ assignment.caller_id_ref.submitted_by.name }}</div>
             <div class="text-muted small">
-              Assigned to you at {{ assignment.assigned_at.strftime('%H:%M, %d %b %Y') if assignment.assigned_at else '—' }}
+              Assigned to you at <span data-utc="{{ assignment.assigned_at.isoformat() }}" data-format="datetime">{{ assignment.assigned_at.strftime('%H:%M, %d %b %Y') if assignment.assigned_at else '—' }}</span>
             </div>
           </div>
         </div>

@@ -21,6 +21,21 @@ from security_config import (
 
 load_dotenv()
 
+# ---------------------------------------------------------------------------
+# Utility Functions
+# ---------------------------------------------------------------------------
+
+def ensure_utc(dt):
+    """
+    Ensure a datetime object is timezone-aware (UTC).
+    SQLite stores datetimes as naive strings; this helper adds timezone info.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 # Load version from VERSION file
 def get_version():
     version_file = os.path.join(os.path.dirname(__file__), 'VERSION')
@@ -539,10 +554,13 @@ def admin_reports():
             member_data[member_id]['total_break_seconds'] += log.total_break_seconds
         elif log.clock_in_time:
             # Still clocked in - calculate up to now
-            total_time = (datetime.now(timezone.utc) - log.clock_in_time).total_seconds()
+            now_utc = datetime.now(timezone.utc)
+            clock_in_utc = ensure_utc(log.clock_in_time)
+            total_time = (now_utc - clock_in_utc).total_seconds()
             current_break = log.total_break_seconds
             if log.current_break_start:
-                current_break += (datetime.now(timezone.utc) - log.current_break_start).total_seconds()
+                break_start_utc = ensure_utc(log.current_break_start)
+                current_break += (now_utc - break_start_utc).total_seconds()
             working_time = total_time - current_break
             member_data[member_id]['total_working_seconds'] += working_time
             member_data[member_id]['total_break_seconds'] += current_break
@@ -783,7 +801,9 @@ def update_self_status():
         # Clock out and finalize break time
         if attendance and attendance.current_break_start:
             # If currently on break, calculate and add final break duration
-            break_duration = (datetime.now(timezone.utc) - attendance.current_break_start).total_seconds()
+            now_utc = datetime.now(timezone.utc)
+            break_start_utc = ensure_utc(attendance.current_break_start)
+            break_duration = (now_utc - break_start_utc).total_seconds()
             attendance.total_break_seconds += int(break_duration)
             attendance.current_break_start = None
         
@@ -843,7 +863,9 @@ def update_self_status():
         logger.info(f"Member clocked in - User: {current_user.username}")
     elif attendance.current_break_start:
         # Returning from break - calculate break duration
-        break_duration = (datetime.now(timezone.utc) - attendance.current_break_start).total_seconds()
+        now_utc = datetime.now(timezone.utc)
+        break_start_utc = ensure_utc(attendance.current_break_start)
+        break_duration = (now_utc - break_start_utc).total_seconds()
         attendance.total_break_seconds += int(break_duration)
         attendance.current_break_start = None
         attendance.last_updated = datetime.now(timezone.utc)

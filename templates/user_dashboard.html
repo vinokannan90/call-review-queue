@@ -109,7 +109,7 @@
                 <span class="text-muted small">—</span>
               {% endif %}
             </td>
-            <td class="small text-muted">{{ s.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td class="small text-muted" data-utc="{{ s.submitted_at.isoformat() }}" data-format="datetime">{{ s.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
             <td>
               {% if s.status == 'queued' %}
                 <span class="badge status-queued"><i class="bi bi-hourglass-split me-1"></i>Queued</span>

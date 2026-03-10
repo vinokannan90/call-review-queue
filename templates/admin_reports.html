@@ -81,8 +81,12 @@
         <span class="badge bg-primary">{{ filter_label }}</span>
       </div>
       <div class="text-muted small">
-        <i class="bi bi-calendar3"></i> {{ start_date.strftime('%B %d, %Y') }} 
-        {% if start_date != end_date %}- {{ end_date.strftime('%B %d, %Y') }}{% endif %}
+        <i class="bi bi-calendar3"></i> 
+        <span data-utc="{{ start_date.isoformat() }}" data-format="date">{{ start_date.strftime('%B %d, %Y') }}</span>
+        {% if start_date != end_date %}
+        - <span data-utc="{{ end_date.isoformat() }}" data-format="date">{{ end_date.strftime('%B %d, %Y') }}</span>
+        {% endif %}
+        &nbsp;|&nbsp; <span id="user-timezone" class="text-muted"></span>
       </div>
     </div>
   </div>
@@ -167,7 +171,7 @@
                       <td class="font-monospace fw-semibold">{{ raised.caller_id }}</td>
                       <td><span class="badge bg-warning text-dark">{{ raised.core_id or '—' }}</span></td>
                       <td class="small">{{ raised.comment or '—' }}</td>
-                      <td class="small text-muted">{{ raised.completed_at.strftime('%b %d, %H:%M') }}</td>
+                      <td class="small text-muted" data-utc="{{ raised.completed_at.isoformat() }}" data-format="datetime">{{ raised.completed_at.strftime('%b %d, %H:%M') }}</td>
                     </tr>
                     {% endfor %}
                   </tbody>
@@ -224,6 +228,14 @@
     const endDateInput = document.getElementById('end_date');
     endDateInput.min = this.value;
     endDateInput.max = maxEndDate.toISOString().split('T')[0];
+  });
+
+  // Display user's timezone
+  document.addEventListener('DOMContentLoaded', function() {
+    const tzElement = document.getElementById('user-timezone');
+    if (tzElement && window.TimezoneUtils) {
+      tzElement.textContent = `Your timezone: ${TimezoneUtils.getUserTimezone()} (UTC${TimezoneUtils.getUtcOffset()})`;
+    }
   });
 </script>
 

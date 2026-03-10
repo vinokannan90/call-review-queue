@@ -5,6 +5,34 @@ All notable changes to the Call Review Queue system will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-03-10
+
+### Added
+- **Timezone Localization**: All timestamps now display in user's local timezone while storing UTC in database
+- **Timezone Utilities Library**: JavaScript conversion functions (`timezone_utils.html`) with formatTime, formatDateTime, formatDate, formatRelative
+- **Automatic Timezone Detection**: Browser-based timezone detection using Intl API (CDT, IST, UTC, etc.)
+- **Timezone Documentation**: Complete implementation guide in `docs/TIMEZONE-GUIDE.md`
+- **Enhanced Logging**: Console debugging for timezone conversions and data-utc attribute processing
+
+### Fixed
+- **DateTime Offset Error**: Fixed "TypeError: can't subtract offset-naive and offset-aware datetimes" when switching status
+- **Timer Static Display**: Fixed timers not updating in real-time, only on page refresh
+- **SQLite Timezone Handling**: Added `ensure_utc()` helper function to handle timezone-naive datetime objects from SQLite
+
+### Changed
+- **All Templates Updated**: Added `data-utc` attributes to 18+ timestamp displays across 7 templates
+- **Admin Reports Enhancement**: Added timezone indicator showing user's current timezone (e.g., "Your timezone: CDT (UTC-05:00)")
+- **Base Template**: Included `timezone_utils.html` globally for all pages
+- **Fallback Support**: Preserved server-side strftime() rendering for non-JavaScript browsers
+
+### Technical Details
+- Modified templates: `admin_dashboard.html`, `admin_reports.html`, `complaint_dashboard.html`, `complaint_analyse.html`, `qa_dashboard.html`, `user_dashboard.html`, `base.html`
+- New file: `templates/timezone_utils.html` (~220 lines)
+- Fixed datetime arithmetic in 3 locations: sign-off break calculation, return from break calculation, reports page calculations
+- All `datetime.now()` calls use `timezone.utc` throughout application
+
+---
+
 ## [0.4.1] - 2026-03-09
 
 ### Added

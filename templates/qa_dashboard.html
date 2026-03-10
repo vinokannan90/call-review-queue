@@ -111,7 +111,7 @@
                 <span class="text-muted small">—</span>
               {% endif %}
             </td>
-            <td class="small text-muted">{{ s.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td class="small text-muted" data-utc="{{ s.submitted_at.isoformat() }}" data-format="datetime">{{ s.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
             <td>
               {% if s.status == 'queued' %}
                 <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Queued</span>
@@ -168,12 +168,12 @@
           <div class="col-md-3">
             <div class="text-muted small fw-semibold mb-1"><i class="bi bi-person me-1"></i>Submitted By (User)</div>
             <div class="fw-semibold">{{ review.caller_id_ref.submitted_by.name }}</div>
-            <div class="text-muted small">{{ review.caller_id_ref.submitted_at.strftime('%d %b %Y, %H:%M') }}</div>
+            <div class="text-muted small" data-utc="{{ review.caller_id_ref.submitted_at.isoformat() }}" data-format="datetime">{{ review.caller_id_ref.submitted_at.strftime('%d %b %Y, %H:%M') }}</div>
           </div>
           <div class="col-md-3">
             <div class="text-muted small fw-semibold mb-1"><i class="bi bi-headphones me-1"></i>Dismissed By (Complaint)</div>
             <div class="fw-semibold">{{ review.dismissed_by.name }}</div>
-            <div class="text-muted small">{{ review.dismissed_at.strftime('%d %b %Y, %H:%M') }}</div>
+            <div class="text-muted small" data-utc="{{ review.dismissed_at.isoformat() }}" data-format="datetime">{{ review.dismissed_at.strftime('%d %b %Y, %H:%M') }}</div>
           </div>
           <div class="col-md-3">
             <div class="text-muted small fw-semibold mb-1"><i class="bi bi-play-circle me-1"></i>Recording</div>
@@ -307,7 +307,7 @@
             </td>
             <td class="small text-muted">{{ review.reviewed_by.name if review.reviewed_by else '—' }}</td>
             <td class="small text-muted">
-              {{ review.reviewed_at.strftime('%d %b %Y, %H:%M') if review.reviewed_at else '—' }}
+              <span data-utc="{{ review.reviewed_at.isoformat() }}" data-format="datetime">{{ review.reviewed_at.strftime('%d %b %Y, %H:%M') }}</span>
             </td>
           </tr>
           {% endfor %}

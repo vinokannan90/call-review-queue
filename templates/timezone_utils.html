@@ -1,0 +1,204 @@
+<!-- Timezone Conversion Utilities -->
+<!-- Include this in base.html for global timezone-aware datetime display -->
+<script>
+  /**
+   * Timezone Utilities
+   * Converts UTC datetimes to user's local timezone for display
+   */
+  window.TimezoneUtils = {
+    /**
+     * Convert UTC ISO string to local Date object
+     * @param {string} utcIsoString - ISO 8601 datetime string (e.g., "2026-03-09T14:30:00+00:00")
+     * @returns {Date|null} - Date object in local timezone or null if invalid
+     */
+    utcToLocal: function(utcIsoString) {
+      if (!utcIsoString) return null;
+      try {
+        return new Date(utcIsoString);
+      } catch (err) {
+        console.error('Error parsing UTC datetime:', utcIsoString, err);
+        return null;
+      }
+    },
+
+    /**
+     * Format datetime to user's locale with time only (HH:MM)
+     * @param {Date|string} datetime - Date object or UTC ISO string
+     * @returns {string} - Formatted time string (e.g., "2:30 PM" or "14:30")
+     */
+    formatTime: function(datetime) {
+      const date = datetime instanceof Date ? datetime : this.utcToLocal(datetime);
+      if (!date) return '--:--';
+      
+      return date.toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+
+    /**
+     * Format datetime to user's locale with full date and time
+     * @param {Date|string} datetime - Date object or UTC ISO string
+     * @returns {string} - Formatted datetime string (e.g., "Mar 9, 2026, 2:30 PM")
+     */
+    formatDateTime: function(datetime) {
+      const date = datetime instanceof Date ? datetime : this.utcToLocal(datetime);
+      if (!date) return '--';
+      
+      return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+
+    /**
+     * Format datetime to user's locale with date only
+     * @param {Date|string} datetime - Date object or UTC ISO string
+     * @returns {string} - Formatted date string (e.g., "March 9, 2026")
+     */
+    formatDate: function(datetime) {
+      const date = datetime instanceof Date ? datetime : this.utcToLocal(datetime);
+      if (!date) return '--';
+      
+      return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    },
+
+    /**
+     * Format datetime to user's locale with short date (MM/DD/YYYY)
+     * @param {Date|string} datetime - Date object or UTC ISO string
+     * @returns {string} - Formatted date string
+     */
+    formatShortDate: function(datetime) {
+      const date = datetime instanceof Date ? datetime : this.utcToLocal(datetime);
+      if (!date) return '--';
+      
+      return date.toLocaleDateString();
+    },
+
+    /**
+     * Format datetime relative to now (e.g., "2 hours ago", "just now")
+     * @param {Date|string} datetime - Date object or UTC ISO string
+     * @returns {string} - Relative time string
+     */
+    formatRelative: function(datetime) {
+      const date = datetime instanceof Date ? datetime : this.utcToLocal(datetime);
+      if (!date) return '--';
+      
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+      
+      if (diffMins < 1) return 'just now';
+      if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+      if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+      
+      return this.formatShortDate(date);
+    },
+
+    /**
+     * Convert all elements with data-utc attribute to local timezone
+     * Call this on page load to automatically convert UTC timestamps
+     */
+    convertAllTimestamps: function() {
+      const elements = document.querySelectorAll('[data-utc]');
+      console.log('[TimezoneUtils] Found', elements.length, 'elements with data-utc attribute to convert');
+      
+      let converted = 0;
+      elements.forEach(element => {
+        const utcTime = element.dataset.utc;
+        const format = element.dataset.format || 'time'; // time, datetime, date, relative
+        
+        if (!utcTime) {
+          console.warn('[TimezoneUtils] Element has data-utc but value is empty:', element);
+          return;
+        }
+        
+        let formatted;
+        switch (format) {
+          case 'datetime':
+            formatted = this.formatDateTime(utcTime);
+            break;
+          case 'date':
+            formatted = this.formatDate(utcTime);
+            break;
+          case 'short-date':
+            formatted = this.formatShortDate(utcTime);
+            break;
+          case 'relative':
+            formatted = this.formatRelative(utcTime);
+            break;
+          case 'time':
+          default:
+            formatted = this.formatTime(utcTime);
+        }
+        
+        element.textContent = formatted;
+        converted++;
+        
+        // Add title with full datetime for hover tooltip
+        if (format !== 'datetime') {
+          element.title = this.formatDateTime(utcTime);
+        }
+      });
+      
+      console.log('[TimezoneUtils] Successfully converted', converted, 'timestamps');
+    },
+
+    /**
+     * Get user's timezone abbreviation (e.g., "CDT", "IST", "UTC")
+     * @returns {string} - Timezone abbreviation
+     */
+    getUserTimezone: function() {
+      const date = new Date();
+      const tzString = date.toLocaleString('en-US', { timeZoneName: 'short' });
+      const match = tzString.match(/\b([A-Z]{2,5})\b/);
+      return match ? match[1] : Intl.DateTimeFormat().resolvedOptions().timeZone;
+    },
+
+    /**
+     * Get user's UTC offset (e.g., "-05:00" for CDT)
+     * @returns {string} - UTC offset string
+     */
+    getUtcOffset: function() {
+      const date = new Date();
+      const offset = -date.getTimezoneOffset();
+      const hours = Math.floor(Math.abs(offset) / 60);
+      const minutes = Math.abs(offset) % 60;
+      const sign = offset >= 0 ? '+' : '-';
+      return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
+  };
+
+  // Auto-convert timestamps when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('[TimezoneUtils] DOM loaded, starting automatic timezone conversion');
+      TimezoneUtils.convertAllTimestamps();
+    });
+  } else {
+    // DOM already loaded (script included late in page)
+    console.log('[TimezoneUtils] DOM already ready, running immediate conversion');
+    TimezoneUtils.convertAllTimestamps();
+  }
+
+  // Also run after a short delay to catch any dynamically added content
+  setTimeout(function() {
+    console.log('[TimezoneUtils] Running delayed conversion check');
+    TimezoneUtils.convertAllTimestamps();
+  }, 500);
+
+  // Log user's timezone for debugging
+  console.log('[TimezoneUtils] Initialized');
+  console.log('[TimezoneUtils] User Timezone:', TimezoneUtils.getUserTimezone()); 
+  console.log('[TimezoneUtils] UTC Offset:', TimezoneUtils.getUtcOffset());
+</script>

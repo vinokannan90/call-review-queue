@@ -117,12 +117,12 @@
               <div class="small mb-2 text-start border-top pt-2">
                 <div class="d-flex justify-content-between mb-1">
                   <span class="text-muted"><i class="bi bi-clock me-1"></i>Clock In:</span>
-                  <span class="fw-semibold">{{ attendance.clock_in_time.strftime('%H:%M') }}</span>
+                  <span class="fw-semibold" data-utc="{{ attendance.clock_in_time.isoformat() }}" data-format="time">{{ attendance.clock_in_time.strftime('%H:%M') }}</span>
                 </div>
                 {% if attendance.clock_out_time %}
                 <div class="d-flex justify-content-between mb-1">
                   <span class="text-muted"><i class="bi bi-clock-history me-1"></i>Clock Out:</span>
-                  <span class="fw-semibold">{{ attendance.clock_out_time.strftime('%H:%M') }}</span>
+                  <span class="fw-semibold" data-utc="{{ attendance.clock_out_time.isoformat() }}" data-format="time">{{ attendance.clock_out_time.strftime('%H:%M') }}</span>
                 </div>
                 {% endif %}
                 <div class="d-flex justify-content-between mb-1 align-items-center">
@@ -264,7 +264,7 @@
                   <i class="bi bi-grip-vertical me-1 text-muted"></i>{{ c.caller_id_number }}
                 </td>
                 <td class="small">{{ c.submitted_by.name }}</td>
-                <td class="small text-muted">{{ c.submitted_at.strftime('%H:%M, %d %b') }}</td>
+                <td class="small text-muted" data-utc="{{ c.submitted_at.isoformat() }}" data-format="datetime">{{ c.submitted_at.strftime('%H:%M, %d %b') }}</td>
                 <td class="text-center">
                   {% if c.reserved_for_member_id %}
                     <span class="badge bg-primary">{{ c.reserved_for.user.name }}</span>
@@ -319,7 +319,7 @@
                   {% else %}<span class="text-muted">—</span>{% endif %}
                 </td>
                 <td class="small text-muted">
-                  {% if item.assigned_at %}{{ item.assigned_at.strftime('%H:%M, %d %b') }}{% endif %}
+                  <span data-utc="{{ item.assigned_at.isoformat() }}" data-format="datetime">{{ item.assigned_at.strftime('%H:%M, %d %b') }}</span>
                 </td>
               </tr>
               {% endfor %}
@@ -360,7 +360,7 @@
           <tr>
             <td class="ps-3 font-monospace fw-semibold text-danger">{{ c.caller_id_number }}</td>
             <td class="small">{{ c.submitted_by.name }}</td>
-            <td class="small text-muted">{{ c.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td class="small text-muted" data-utc="{{ c.submitted_at.isoformat() }}" data-format="datetime">{{ c.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
             <td class="small">
               {% if c.aws_recording_url %}
                 <a href="{{ c.aws_recording_url }}" target="_blank" class="text-decoration-none">
@@ -405,7 +405,7 @@
           <tr class="text-muted">
             <td class="ps-3 font-monospace fw-semibold">{{ c.caller_id_number }}</td>
             <td class="small">{{ c.submitted_by.name }}</td>
-            <td class="small">{{ c.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td class="small" data-utc="{{ c.submitted_at.isoformat() }}" data-format="datetime">{{ c.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
             <td class="small">
               {% if c.aws_recording_url %}
                 <a href="{{ c.aws_recording_url }}" target="_blank" class="text-decoration-none">
@@ -569,46 +569,56 @@
       const clockInStr = timer.dataset.clockIn;
       if (!clockInStr) return;
       
-      const clockOutStr = timer.dataset.clockOut;
-      const clockIn = new Date(clockInStr);
-      const baseBreakSeconds = parseInt(timer.dataset.breakSeconds) || 0;
-      const onBreak = timer.dataset.onBreak === 'true';
-      const breakStartStr = timer.dataset.breakStart;
-      
-      // If clocked out, use frozen time
-      const endTime = clockOutStr ? new Date(clockOutStr) : now;
-      
-      // Calculate total elapsed time
-      const totalElapsed = Math.floor((endTime - clockIn) / 1000);
-      
-      // Calculate current break time
-      let currentBreakTime = baseBreakSeconds;
-      if (onBreak && breakStartStr && !clockOutStr) {
-        const breakStart = new Date(breakStartStr);
-        const currentBreakDuration = Math.floor((now - breakStart) / 1000);
-        currentBreakTime += currentBreakDuration;
+      try {
+        const clockOutStr = timer.dataset.clockOut;
+        const clockIn = new Date(clockInStr);
+        const baseBreakSeconds = parseInt(timer.dataset.breakSeconds) || 0;
+        const onBreak = timer.dataset.onBreak === 'true';
+        const breakStartStr = timer.dataset.breakStart;
+        
+        // If clocked out, use frozen time
+        const endTime = clockOutStr ? new Date(clockOutStr) : now;
+        
+        // Calculate total elapsed time
+        const totalElapsed = Math.floor((endTime - clockIn) / 1000);
+        
+        // Calculate current break time
+        let currentBreakTime = baseBreakSeconds;
+        if (onBreak && breakStartStr && !clockOutStr) {
+          const breakStart = new Date(breakStartStr);
+          const currentBreakDuration = Math.floor((now - breakStart) / 1000);
+          currentBreakTime += currentBreakDuration;
+        }
+        
+        // Working time = Total elapsed - Break time
+        const workingTime = totalElapsed - currentBreakTime;
+        timer.textContent = formatTime(Math.max(0, workingTime));
+      } catch (err) {
+        console.error('Error updating working timer:', err, timer.dataset);
+        timer.textContent = '--:--:--';
       }
-      
-      // Working time = Total elapsed - Break time
-      const workingTime = totalElapsed - currentBreakTime;
-      timer.textContent = formatTime(Math.max(0, workingTime));
     });
     
     // Update break time displays
     document.querySelectorAll('.break-display').forEach(breakTimer => {
-      const clockOutStr = breakTimer.dataset.clockOut;
-      const baseBreakSeconds = parseInt(breakTimer.dataset.breakSeconds) || 0;
-      const onBreak = breakTimer.dataset.onBreak === 'true';
-      const breakStartStr = breakTimer.dataset.breakStart;
-      
-      let totalBreakTime = baseBreakSeconds;
-      if (onBreak && breakStartStr && !clockOutStr) {
-        const breakStart = new Date(breakStartStr);
-        const currentBreakDuration = Math.floor((now - breakStart) / 1000);
-        totalBreakTime += currentBreakDuration;
+      try {
+        const clockOutStr = breakTimer.dataset.clockOut;
+        const baseBreakSeconds = parseInt(breakTimer.dataset.breakSeconds) || 0;
+        const onBreak = breakTimer.dataset.onBreak === 'true';
+        const breakStartStr = breakTimer.dataset.breakStart;
+        
+        let totalBreakTime = baseBreakSeconds;
+        if (onBreak && breakStartStr && !clockOutStr) {
+          const breakStart = new Date(breakStartStr);
+          const currentBreakDuration = Math.floor((now - breakStart) / 1000);
+          totalBreakTime += currentBreakDuration;
+        }
+        
+        breakTimer.textContent = formatTime(totalBreakTime);
+      } catch (err) {
+        console.error('Error updating break timer:', err, breakTimer.dataset);
+        breakTimer.textContent = '--:--:--';
       }
-      
-      breakTimer.textContent = formatTime(totalBreakTime);
     });
   }
 
@@ -638,6 +648,7 @@
   }
 
   // Initialize timers immediately and then update every second
+  console.log('Timer initialization - Found', document.querySelectorAll('.timer-display').length, 'working timers and', document.querySelectorAll('.break-display').length, 'break timers');
   updateTimers();
   setInterval(updateTimers, 1000);
 </script>
