@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
 {% block title %}Admin Control Panel — Call Review Queue{% endblock %}
-{% block head %}<meta http-equiv="refresh" content="5">{% endblock %}
 {% block content %}
 
 <!-- Page Header -->
@@ -62,18 +61,21 @@
   <div class="card-header bg-dark text-white py-2">
     <i class="bi bi-people-fill me-1"></i> Team Availability
     <small class="ms-2 text-warning">Member must self-mark Present before you can approve them</small>
+    <small class="ms-2 text-info"><i class="bi bi-hand-index me-1"></i>Drag CallerIDs here to manually assign (max 3 per member)</small>
   </div>
   <div class="card-body">
     <div class="row g-3">
       {% for member in team_members %}
       {% set status = member.self_status %}
       <div class="col-sm-6 col-md-3">
-        <div class="card h-100 border-2
+        <div class="card h-100 border-2 member-drop-zone
           {% if status == 'present' and member.admin_approved %}border-success bg-success bg-opacity-10
           {% elif status == 'present' %}border-warning bg-warning bg-opacity-10
           {% elif status == 'break' %}border-warning
           {% elif status == 'signoff' %}border-secondary
-          {% else %}border-light{% endif %}">
+          {% else %}border-light{% endif %}"
+          data-member-id="{{ member.id }}"
+          data-can-drop="{{ 'true' if member.can_receive_manual_assignment else 'false' }}">
           <div class="card-body text-center py-3">
             <div class="fs-1 mb-1">
               {% if status == 'present' and member.admin_approved %}
@@ -109,6 +111,31 @@
                 Reviewing: <span class="font-monospace fw-semibold">{{ member.active_assignment.caller_id_ref.caller_id_number }}</span>
               </div>
             {% endif %}
+            
+            <!-- Reserved CallerIDs -->
+            <div class="reserved-list mb-2" id="reserved-{{ member.id }}">
+              {% set reserved = member.reserved_caller_ids|selectattr('status', 'equalto', 'queued')|list %}
+              {% if reserved %}
+                <div class="small text-primary mb-1 fw-semibold">
+                  <i class="bi bi-bookmark-fill me-1"></i>Reserved ({{ reserved|length }}/3):
+                </div>
+                {% for caller in reserved %}
+                <div class="badge bg-primary text-white mb-1 reserved-caller" 
+                     data-caller-id="{{ caller.id }}"
+                     style="cursor: pointer;">
+                  {{ caller.caller_id_number }}
+                  <i class="bi bi-x-circle ms-1 unreserve-btn"
+                     onclick="unreserveCaller({{ caller.id }}, event)"
+                     title="Remove reservation"></i>
+                </div>
+                {% endfor %}
+              {% else %}
+                <div class="small text-muted reserved-empty">
+                  <span id="reserved-count-{{ member.id }}">0</span>/3 reserved
+                </div>
+              {% endif %}
+            </div>
+            
             <form method="POST" action="{{ url_for('toggle_approval', member_id=member.id) }}">
               {% if member.admin_approved %}
                 <button type="submit" class="btn btn-sm btn-outline-danger w-100">
@@ -142,7 +169,10 @@
   <div class="col-lg-5">
     <div class="card border-0 shadow-sm h-100">
       <div class="card-header bg-warning bg-opacity-25 py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold"><i class="bi bi-hourglass-split me-1"></i> Pending Queue</span>
+        <span class="fw-semibold">
+          <i class="bi bi-hourglass-split me-1"></i> Pending Queue
+          <small class="text-muted ms-2">(Drag to assign manually)</small>
+        </span>
         <span class="badge bg-warning text-dark">{{ queued | length }}</span>
       </div>
       <div class="card-body p-0">
@@ -154,14 +184,29 @@
                 <th class="ps-3">CallerID</th>
                 <th>Submitted By</th>
                 <th>Queued At</th>
+                <th class="text-center">Reserved</th>
               </tr>
             </thead>
             <tbody>
               {% for c in queued %}
-              <tr>
-                <td class="ps-3 font-monospace fw-semibold">{{ c.caller_id_number }}</td>
+              <tr class="caller-draggable" 
+                  draggable="true"
+                  data-caller-id="{{ c.id }}"
+                  data-caller-number="{{ c.caller_id_number }}"
+                  data-reserved="{{ 'true' if c.reserved_for_member_id else 'false' }}"
+                  style="cursor: move;">
+                <td class="ps-3 font-monospace fw-semibold">
+                  <i class="bi bi-grip-vertical me-1 text-muted"></i>{{ c.caller_id_number }}
+                </td>
                 <td class="small">{{ c.submitted_by.name }}</td>
                 <td class="small text-muted">{{ c.submitted_at.strftime('%H:%M, %d %b') }}</td>
+                <td class="text-center">
+                  {% if c.reserved_for_member_id %}
+                    <span class="badge bg-primary">{{ c.reserved_for.user.name }}</span>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -323,5 +368,124 @@
 <script>
   document.getElementById('refreshTime').textContent =
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // Drag and Drop functionality
+  let draggedCallerId = null;
+  let draggedCallerNumber = null;
+
+  // Make CallerID rows draggable
+  document.querySelectorAll('.caller-draggable').forEach(row => {
+    row.addEventListener('dragstart', function(e) {
+      const isReserved = this.dataset.reserved === 'true';
+      if (isReserved) {
+        e.preventDefault();
+        alert('This CallerID is already reserved. Click the X on the reserved badge to unreserve it first.');
+        return;
+      }
+      draggedCallerId = this.dataset.callerId;
+      draggedCallerNumber = this.dataset.callerNumber;
+      this.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    row.addEventListener('dragend', function(e) {
+      this.style.opacity = '1';
+      draggedCallerId = null;
+      draggedCallerNumber = null;
+    });
+  });
+
+  // Make member cards droppable
+  document.querySelectorAll('.member-drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', function(e) {
+      if (this.dataset.canDrop === 'true' && draggedCallerId) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        this.classList.add('border-primary', 'border-3');
+      }
+    });
+
+    zone.addEventListener('dragleave', function(e) {
+      this.classList.remove('border-primary', 'border-3');
+    });
+
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.classList.remove('border-primary', 'border-3');
+      
+      if (!draggedCallerId) return;
+      
+      const memberId = this.dataset.memberId;
+      
+      // Call API to assign manually
+      fetch(`/admin/assign_manual/${draggedCallerId}/${memberId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          // Show success message
+          showToast(data.message, 'success');
+          // Reload page to show updated state
+          location.reload();
+        } else {
+          showToast(data.message, 'danger');
+        }
+      })
+      .catch(error => {
+        showToast('Error assigning CallerID: ' + error, 'danger');
+      });
+    });
+  });
+
+  // Function to unreserve a CallerID
+  function unreserveCaller(callerId, event) {
+    event.stopPropagation();
+    
+    if (!confirm('Remove this reservation?')) return;
+    
+    fetch(`/admin/unassign_manual/${callerId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        showToast(data.message, 'success');
+        location.reload();
+      } else {
+        showToast(data.message, 'danger');
+      }
+    })
+    .catch(error => {
+      showToast('Error removing reservation: ' + error, 'danger');
+    });
+  }
+
+  // Toast notification function
+  function showToast(message, type = 'info') {
+    const toastHtml = `
+      <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 11">
+        <div class="toast show align-items-center text-white bg-${type} border-0" role="alert">
+          <div class="d-flex">
+            <div class="toast-body">${message}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+          </div>
+        </div>
+      </div>
+    `;
+    const container = document.createElement('div');
+    container.innerHTML = toastHtml;
+    document.body.appendChild(container);
+    
+    setTimeout(() => {
+      container.remove();
+    }, 3000);
+  }
 </script>
 {% endblock %}

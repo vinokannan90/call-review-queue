@@ -11,6 +11,17 @@ from models import Assignment, CallerID, QAReview, TeamMember, User, db
 
 load_dotenv()
 
+# Load version from VERSION file
+def get_version():
+    version_file = os.path.join(os.path.dirname(__file__), 'VERSION')
+    try:
+        with open(version_file, 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return '0.2.0'
+
+__version__ = get_version()
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-secret-change-in-prod')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
@@ -31,6 +42,12 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
+# Make version available to all templates
+@app.context_processor
+def inject_version():
+    return {'app_version': __version__}
+
+
 # ---------------------------------------------------------------------------
 # Queue assignment logic
 # ---------------------------------------------------------------------------
@@ -40,7 +57,9 @@ def assign_queued_caller_ids():
 
     Eligibility: self_status == 'present' AND admin_approved == True.
     Maximum ONE active assignment per eligible member at any time.
-    Assignment order: FIFO (oldest submitted_at first).
+    Assignment order: 
+      1. Manually reserved CallerIDs for this member (oldest first)
+      2. General queue FIFO (oldest submitted_at first, not manually reserved)
     Always commits the session before returning.
     """
     eligible = (
@@ -53,14 +72,25 @@ def assign_queued_caller_ids():
         if member.active_assignment is not None:
             continue  # already has one — skip
 
+        # First, check if there are any CallerIDs manually reserved for this member
         next_caller = (
             CallerID.query
-            .filter_by(status='queued')
-            .order_by(CallerID.submitted_at)
+            .filter_by(status='queued', reserved_for_member_id=member.id)
+            .order_by(CallerID.reserved_at)
             .first()
         )
+        
+        # If no reserved CallerIDs, get from general queue (not reserved for anyone)
         if next_caller is None:
-            break  # queue exhausted
+            next_caller = (
+                CallerID.query
+                .filter_by(status='queued', reserved_for_member_id=None)
+                .order_by(CallerID.submitted_at)
+                .first()
+            )
+        
+        if next_caller is None:
+            continue  # no CallerIDs available for this member
 
         assignment = Assignment(
             caller_id_id=next_caller.id,
@@ -70,6 +100,11 @@ def assign_queued_caller_ids():
             outcome=None,
         )
         next_caller.status = 'assigned'
+        # Clear reservation when assigned
+        next_caller.reserved_for_member_id = None
+        next_caller.reserved_at = None
+        next_caller.reserved_by_id = None
+        
         db.session.add(assignment)
         db.session.flush()
 
@@ -148,7 +183,7 @@ def user_dashboard():
 @app.route('/user/submit', methods=['POST'])
 @login_required
 def submit_caller_id():
-    if current_user.role != 'user':
+    if current_user.role not in ('user', 'qa'):
         flash('Access denied.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -158,11 +193,11 @@ def submit_caller_id():
 
     if not caller_id_number:
         flash('CallerID is required.', 'danger')
-        return redirect(url_for('user_dashboard'))
+        return redirect(url_for('qa_dashboard' if current_user.role == 'qa' else 'user_dashboard'))
 
     if CallerID.query.filter_by(caller_id_number=caller_id_number).first():
         flash(f'CallerID {caller_id_number} has already been submitted.', 'warning')
-        return redirect(url_for('user_dashboard'))
+        return redirect(url_for('qa_dashboard' if current_user.role == 'qa' else 'user_dashboard'))
 
     new_entry = CallerID(
         caller_id_number=caller_id_number,
@@ -177,6 +212,8 @@ def submit_caller_id():
     assign_queued_caller_ids()
 
     flash(f'CallerID {caller_id_number} submitted and queued for assignment.', 'success')
+    if current_user.role == 'qa':
+        return redirect(url_for('qa_dashboard'))
     return redirect(url_for('user_dashboard'))
 
 
@@ -290,6 +327,66 @@ def mark_reviewed(caller_id_id):
     return redirect(url_for('admin_dashboard'))
 
 
+@app.route('/admin/assign_manual/<int:caller_id_id>/<int:member_id>', methods=['POST'])
+@login_required
+def assign_manual(caller_id_id, member_id):
+    if current_user.role != 'admin':
+        return {'success': False, 'message': 'Access denied'}, 403
+
+    caller = CallerID.query.get_or_404(caller_id_id)
+    member = TeamMember.query.get_or_404(member_id)
+
+    # Validate CallerID is queued and not already reserved
+    if caller.status != 'queued':
+        return {'success': False, 'message': 'CallerID is not in queued status'}, 400
+    
+    if caller.reserved_for_member_id is not None:
+        return {'success': False, 'message': 'CallerID is already reserved for another team member'}, 400
+
+    # Validate team member can receive manual assignment
+    if member.self_status not in ('present', 'break'):
+        return {'success': False, 'message': f'{member.user.name} is not available (status: {member.self_status})'}, 400
+    
+    if member.reserved_count >= 3:
+        return {'success': False, 'message': f'{member.user.name} already has 3 CallerIDs reserved'}, 400
+
+    # Assign manually
+    caller.reserved_for_member_id = member.id
+    caller.reserved_at = datetime.now(timezone.utc)
+    caller.reserved_by_id = current_user.id
+    db.session.commit()
+
+    return {
+        'success': True, 
+        'message': f'CallerID {caller.caller_id_number} reserved for {member.user.name}',
+        'reserved_count': member.reserved_count
+    }
+
+
+@app.route('/admin/unassign_manual/<int:caller_id_id>', methods=['POST'])
+@login_required
+def unassign_manual(caller_id_id):
+    if current_user.role != 'admin':
+        return {'success': False, 'message': 'Access denied'}, 403
+
+    caller = CallerID.query.get_or_404(caller_id_id)
+
+    if caller.reserved_for_member_id is None:
+        return {'success': False, 'message': 'CallerID is not manually reserved'}, 400
+
+    # Clear reservation
+    member_name = caller.reserved_for.user.name
+    caller.reserved_for_member_id = None
+    caller.reserved_at = None
+    caller.reserved_by_id = None
+    db.session.commit()
+
+    return {
+        'success': True,
+        'message': f'CallerID {caller.caller_id_number} reservation removed from {member_name}'
+    }
+
+
 # ---------------------------------------------------------------------------
 # Complaint role routes
 # ---------------------------------------------------------------------------
@@ -339,6 +436,16 @@ def update_self_status():
         if active:
             active.caller_id_ref.status = 'queued'
             db.session.delete(active)
+        
+        # Clear any manually reserved CallerIDs — return them to general queue
+        reserved_callers = CallerID.query.filter_by(
+            reserved_for_member_id=member.id, status='queued'
+        ).all()
+        for caller in reserved_callers:
+            caller.reserved_for_member_id = None
+            caller.reserved_at = None
+            caller.reserved_by_id = None
+        
         # Reset admin approval — must be re-approved on the next shift
         member.admin_approved = False
         member.self_status = 'signoff'
@@ -463,6 +570,20 @@ def qa_dashboard():
         flash('Access denied.', 'danger')
         return redirect(url_for('dashboard'))
 
+    # Get submissions by this QA user
+    submissions = (
+        CallerID.query
+        .filter_by(submitted_by_id=current_user.id)
+        .order_by(CallerID.submitted_at.desc())
+        .all()
+    )
+
+    # Calculate stats
+    stats = {
+        'total': len(submissions),
+        'queued': CallerID.query.filter_by(status='queued').count(),
+    }
+
     pending = (
         QAReview.query
         .filter_by(verdict=None)
@@ -476,7 +597,7 @@ def qa_dashboard():
         .limit(20)
         .all()
     )
-    return render_template('qa_dashboard.html', pending=pending, completed=completed)
+    return render_template('qa_dashboard.html', pending=pending, completed=completed, stats=stats, submissions=submissions)
 
 
 @app.route('/qa/submit/<int:qa_review_id>', methods=['POST'])

@@ -1,7 +1,23 @@
 # Call Review Queue — Proof of Concept
 
+**Version**: 0.2.0  
+**Release Date**: March 9, 2026  
+**Status**: Proof of Concept (Enhanced)
+
 A Python + PostgreSQL web application demonstrating the proposed replacement
 for the Microsoft Access call review workflow.
+
+---
+
+## 🎯 Latest Release (v0.2.0)
+
+### Major Features
+- ✨ **Manual CallerID Assignment** via drag-and-drop interface
+- 🎯 **Reserved Queue System** - Assign up to 3 CallerIDs per team member
+- 📋 **QA Role Enhancement** - Direct CallerID submission capability
+- 🔄 **Priority Assignment Logic** - Reserved CallerIDs processed first
+
+See [CHANGELOG.md](CHANGELOG.md) for complete release notes.
 
 ---
 

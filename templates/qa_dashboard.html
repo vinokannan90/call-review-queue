@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
 {% block title %}QA Review — Call Review Queue{% endblock %}
-{% block head %}<meta http-equiv="refresh" content="5">{% endblock %}
 
 {% block content %}
 
@@ -10,12 +9,18 @@
     <i class="bi bi-clipboard2-check text-info me-2"></i>QA Review Dashboard
   </h4>
   <p class="text-muted small mb-0">
-    Review CallerIDs dismissed by the complaints team and decide whether further action is required.
+    Submit new CallerIDs or review CallerIDs dismissed by the complaints team.
   </p>
 </div>
 
 <!-- Stats Row -->
 <div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="fs-3 fw-bold text-dark">{{ stats.total }}</div>
+      <div class="small text-muted">My Submissions</div>
+    </div>
+  </div>
   <div class="col-6 col-md-3">
     <div class="card border-0 shadow-sm text-center py-3">
       <div class="fs-3 fw-bold text-warning">{{ pending | length }}</div>
@@ -27,6 +32,114 @@
       <div class="fs-3 fw-bold text-success">{{ completed | length }}</div>
       <div class="small text-muted">Completed (Last 20)</div>
     </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="fs-3 fw-bold text-info">{{ stats.queued }}</div>
+      <div class="small text-muted">In Queue</div>
+    </div>
+  </div>
+</div>
+
+<!-- Submit Form -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-info text-white py-2">
+    <i class="bi bi-plus-circle me-1"></i> Submit New CallerID
+  </div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('submit_caller_id') }}">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label for="caller_id" class="form-label fw-semibold">CallerID Number <span class="text-danger">*</span></label>
+          <input type="text" id="caller_id" name="caller_id" class="form-control"
+                 placeholder="e.g. 61294881234" required>
+        </div>
+        <div class="col-md-8">
+          <label for="aws_url" class="form-label fw-semibold">
+            AWS Recording URL <span class="text-muted fw-normal">(optional)</span>
+          </label>
+          <input type="url" id="aws_url" name="aws_url" class="form-control"
+                 placeholder="https://s3.amazonaws.com/bucket/recording.mp3">
+        </div>
+      </div>
+      <div class="row g-3 mt-1 align-items-end">
+        <div class="col-md-10">
+          <label for="reason" class="form-label fw-semibold">Reason for the request <span class="text-muted fw-normal">(optional)</span></label>
+          <textarea id="reason" name="reason" class="form-control" rows="2"
+                    placeholder="Briefly describe why this CallerID is being submitted for review..."></textarea>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-info w-100">
+            <i class="bi bi-send me-1"></i> Submit
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- My Submissions Table -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-list-ul me-1"></i> My Submitted CallerIDs</span>
+    <span class="badge bg-secondary">{{ submissions | length }} total</span>
+  </div>
+  <div class="card-body p-0">
+    {% if submissions %}
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">CallerID</th>
+            <th>AWS Recording</th>
+            <th>Submitted At</th>
+            <th>Status</th>
+            <th>CORE ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in submissions %}
+          <tr>
+            <td class="ps-3 fw-semibold font-monospace">{{ s.caller_id_number }}</td>
+            <td>
+              {% if s.aws_recording_url %}
+                <a href="{{ s.aws_recording_url }}" target="_blank" class="text-decoration-none small">
+                  <i class="bi bi-play-circle me-1"></i>Play Recording
+                </a>
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+            <td class="small text-muted">{{ s.submitted_at.strftime('%d %b %Y, %H:%M') }}</td>
+            <td>
+              {% if s.status == 'queued' %}
+                <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Queued</span>
+              {% elif s.status == 'assigned' %}
+                <span class="badge bg-primary"><i class="bi bi-person-check me-1"></i>Being Reviewed</span>
+              {% elif s.status == 'dismissed' %}
+                <span class="badge bg-secondary"><i class="bi bi-archive me-1"></i>QA Queue</span>
+              {% elif s.status == 'raised' %}
+                <span class="badge bg-danger"><i class="bi bi-flag me-1"></i>Raised</span>
+              {% elif s.status == 'qa_not_required' %}
+                <span class="badge bg-dark"><i class="bi bi-x-circle me-1"></i>Not Required</span>
+              {% elif s.status == 'reviewed' %}
+                <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Reviewed</span>
+              {% else %}
+                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Completed</span>
+              {% endif %}
+            </td>
+            <td class="small font-monospace">{{ s.core_id or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+      No submissions yet. Use the form above to submit your first CallerID.
+    </div>
+    {% endif %}
   </div>
 </div>
 

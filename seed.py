@@ -24,6 +24,7 @@ DEMO_USERS = [
     ('lisa.park',   'Complaint@123',  'Lisa Park',     'complaint'),
     ('raj.mehta',   'Complaint@123',  'Raj Mehta',     'complaint'),
     ('emma.brown',  'Complaint@123',  'Emma Brown',    'complaint'),
+    ('qa.user',     'QA@123',         'Alex Johnson',  'qa'),
 ]
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 ﻿{% extends 'base.html' %}
 {% block title %}Complaint Review — Call Review Queue{% endblock %}
-{% block head %}<meta http-equiv="refresh" content="5">{% endblock %}
+
 
 {% block content %}
 
@@ -152,6 +152,58 @@
     {% endif %}
   </div>
 </div>
+
+<!-- My Reserved Queue (Manually Assigned) -->
+{% set reserved_callers = member.reserved_caller_ids|selectattr('status', 'equalto', 'queued')|list %}
+{% if reserved_callers %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-primary bg-opacity-20 py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">
+      <i class="bi bi-bookmark-fill me-1"></i> My Reserved Queue
+      <small class="text-muted ms-2">(Manually assigned by admin)</small>
+    </span>
+    <span class="badge bg-primary">{{ reserved_callers|length }} Reserved</span>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info py-2 small mb-3">
+      <i class="bi bi-info-circle me-1"></i>
+      These CallerIDs have been manually assigned to you by an admin. You will receive them automatically in this order after completing your current assignment.
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">Position</th>
+            <th>CallerID</th>
+            <th>Submitted By</th>
+            <th>Reserved At</th>
+            <th>Recording</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for caller in reserved_callers|sort(attribute='reserved_at') %}
+          <tr>
+            <td class="ps-3 text-center">
+              <span class="badge bg-primary">{{ loop.index }}</span>
+            </td>
+            <td class="font-monospace fw-semibold">{{ caller.caller_id_number }}</td>
+            <td class="small text-muted">{{ caller.submitted_by.name }}</td>
+            <td class="small text-muted">{{ caller.reserved_at.strftime('%H:%M, %d %b') if caller.reserved_at else '—' }}</td>
+            <td class="small">
+              {% if caller.aws_recording_url %}
+                <a href="{{ caller.aws_recording_url }}" target="_blank" class="text-decoration-none">
+                  <i class="bi bi-play-circle me-1"></i>Preview
+                </a>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <!-- History -->
 <div class="card border-0 shadow-sm">
